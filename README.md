@@ -41,7 +41,7 @@ Demo login (after seeding):
 - Teacher: teacher@university.test / Teacher123!
 - Student: student@university.test / Student123!
 
-Users can also create a student account from the login page with a valid email address and a password of at least 8 characters. New sign-ups always receive the STUDENT role.
+Students sign up with their name, email, password, student ID, department, batch, and section. These required profile details are saved to the portal account when the confirmed Supabase session is first used and then reused across the portal, including official result lookup and assignment cover pages. Student IDs are normalized and unique; new sign-ups always receive the STUDENT role.
 
 Change demo passwords and JWT_SECRET before deployment.
 

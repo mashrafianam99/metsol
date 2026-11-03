@@ -578,7 +578,7 @@ function App() {
           <div className="avatar">{user.name?.slice(0, 2).toUpperCase() || "U"}</div>
           <div>
             <strong>{user.name}</strong>
-            <span>{user.studentId || user.role}</span>
+            <span>{user.studentId || user.role}{user.batch ? ` · Batch ${user.batch}` : ""}{user.section ? ` · Section ${user.section}` : ""}</span>
           </div>
         </div>
 
@@ -635,7 +635,7 @@ function App() {
         {active === "Dashboard" && <Dashboard setActive={setActive} />}
         {active === "Courses" && <Courses />}
         {active === "Teachers" && <Teachers />}
-        {active === "Assignments" && <Assignments />}
+        {active === "Assignments" && <Assignments user={user} />}
         {active === "Google Classroom" && <GoogleClassroom />}
         {active === "Payments" && <Payments />}
         {active === "Attendance" && <Attendance />}
@@ -981,15 +981,15 @@ function Teachers() {
   );
 }
 
-function Assignments() {
+function Assignments({ user }) {
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [coverType, setCoverType] = useState(null);
   const [form, setForm] = useState({
-    name: "",
-    studentId: "",
-    section: "",
-    department: "",
-    batch: "",
+    name: user.name || "",
+    studentId: user.studentId || "",
+    section: user.section || "",
+    department: user.department || "",
+    batch: user.batch || "",
     courseCode: courses[0].code,
     teacherName: "",
     teacherDepartment: "",
@@ -1604,6 +1604,8 @@ function Results({ user }) {
               <strong>{user.name || "Signed-in student"}</strong>
               {user.studentId && <span>Student ID · {user.studentId}</span>}
               {user.department && <span>{user.department}</span>}
+              {user.batch && <span>Batch · {user.batch}</span>}
+              {user.section && <span>Section · {user.section}</span>}
             </div>
           </div>
         )}
@@ -1738,6 +1740,8 @@ function Results({ user }) {
                   {user.name && <p><strong>Student:</strong> {user.name}</p>}
                   {user.studentId && <p><strong>Student ID:</strong> {user.studentId}</p>}
                   {user.department && <p><strong>Department:</strong> {user.department}</p>}
+                  {user.batch && <p><strong>Batch:</strong> {user.batch}</p>}
+                  {user.section && <p><strong>Section:</strong> {user.section}</p>}
                 </div>
               )}
               {summary && (

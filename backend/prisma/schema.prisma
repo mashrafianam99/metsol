@@ -28,8 +28,10 @@ model User {
   passwordHash String?
   authId       String?  @unique
   role         Role     @default(STUDENT)
-  studentId    String?
+  studentId    String?  @unique
   department   String?
+  batch        String?
+  section      String?
   phone        String?
   createdAt    DateTime @default(now())
 

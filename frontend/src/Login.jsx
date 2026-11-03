@@ -6,6 +6,10 @@ export default function Login({ onLogin, message = "" }) {
   const [isRegistering, setIsRegistering] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [department, setDepartment] = useState("");
+  const [batch, setBatch] = useState("");
+  const [section, setSection] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -26,6 +30,10 @@ export default function Login({ onLogin, message = "" }) {
       setError("Please enter your email and password.");
       return;
     }
+    if (isRegistering && (!studentId.trim() || !department.trim() || !batch.trim() || !section.trim())) {
+      setError("Please complete your student ID, department, batch, and section.");
+      return;
+    }
     if (isRegistering && password !== confirmPassword) {
       setError("The passwords do not match.");
       return;
@@ -41,7 +49,15 @@ export default function Login({ onLogin, message = "" }) {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: normalizedEmail,
           password,
-          options: { data: { name: name.trim() } },
+          options: {
+            data: {
+              name: name.trim(),
+              studentId: studentId.trim(),
+              department: department.trim(),
+              batch: batch.trim(),
+              section: section.trim(),
+            },
+          },
         });
         if (signUpError) throw new Error(signUpError.message);
         if (!data.session) {
@@ -64,9 +80,15 @@ export default function Login({ onLogin, message = "" }) {
       const response = await apiFetch("/api/me");
       if (!response.ok) {
         await supabase.auth.signOut();
+        let responseError;
+        try {
+          responseError = (await response.json()).error;
+        } catch {
+          responseError = "";
+        }
         throw new Error(response.status === 401
           ? "Sign in failed. Make sure your email address is confirmed."
-          : "The server could not load your profile. Please try again.");
+          : responseError || "The server could not load your profile. Please try again.");
       }
       onLogin(await response.json());
     } catch (requestError) {
@@ -119,6 +141,63 @@ export default function Login({ onLogin, message = "" }) {
               required
             />
           </div>
+
+          {isRegistering && (
+            <div className="login-registration-grid">
+              <div className="login-field">
+                <label htmlFor="login-student-id">Student ID</label>
+                <input
+                  id="login-student-id"
+                  type="text"
+                  autoComplete="off"
+                  maxLength={50}
+                  placeholder="Enter your student ID"
+                  value={studentId}
+                  onChange={(event) => setStudentId(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="login-field">
+                <label htmlFor="login-department">Department</label>
+                <input
+                  id="login-department"
+                  type="text"
+                  autoComplete="organization-title"
+                  maxLength={100}
+                  placeholder="Enter your department"
+                  value={department}
+                  onChange={(event) => setDepartment(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="login-field">
+                <label htmlFor="login-batch">Batch</label>
+                <input
+                  id="login-batch"
+                  type="text"
+                  autoComplete="off"
+                  maxLength={50}
+                  placeholder="Enter your batch"
+                  value={batch}
+                  onChange={(event) => setBatch(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="login-field">
+                <label htmlFor="login-section">Section</label>
+                <input
+                  id="login-section"
+                  type="text"
+                  autoComplete="off"
+                  maxLength={50}
+                  placeholder="Enter your section"
+                  value={section}
+                  onChange={(event) => setSection(event.target.value)}
+                  required
+                />
+              </div>
+            </div>
+          )}
 
           <div className="login-field">
             <label htmlFor="login-password">Password</label>

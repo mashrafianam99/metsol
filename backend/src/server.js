@@ -13,7 +13,8 @@ const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({ori
 const supabaseUrl=process.env.SUPABASE_URL, supabaseAnonKey=process.env.SUPABASE_ANON_KEY;
 if(!supabaseUrl||!supabaseAnonKey)throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set. See backend/.env.example.');
 const supabase=createClient(supabaseUrl,supabaseAnonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
-const userSelect={id:true,name:true,email:true,role:true,studentId:true,department:true};
+const userSelect={id:true,name:true,email:true,role:true,studentId:true,department:true,batch:true,section:true};
+const profileError=(status,message)=>Object.assign(new Error(message),{status});
 // Maps a verified Supabase Auth user to a portal User row (roles and profile data live in our own table).
 async function findOrCreatePortalUser(authUser){
   const email=authUser.email.toLowerCase();
@@ -25,8 +26,17 @@ async function findOrCreatePortalUser(authUser){
     if(existing.authId&&existing.authId!==authUser.id)return null;
     return db.user.update({where:{id:existing.id},data:{authId:authUser.id},select:userSelect});
   }
-  const name=String(authUser.user_metadata?.name||email.split('@')[0]).trim().slice(0,100)||email.split('@')[0];
-  return db.user.create({data:{name,email,authId:authUser.id,role:'STUDENT'},select:userSelect});
+  const metadata=authUser.user_metadata||{};
+  const name=typeof metadata.name==='string'?metadata.name.trim():'';
+  const studentId=typeof metadata.studentId==='string'?metadata.studentId.trim().toUpperCase():'';
+  const department=typeof metadata.department==='string'?metadata.department.trim():'';
+  const batch=typeof metadata.batch==='string'?metadata.batch.trim():'';
+  const section=typeof metadata.section==='string'?metadata.section.trim():'';
+  if(!name||name.length>100||!studentId||studentId.length>50||!department||department.length>100||!batch||batch.length>50||!section||section.length>50)
+    throw profileError(400,'Complete all required student profile fields during sign-up, then confirm your email and sign in.');
+  const existingStudent=await db.user.findFirst({where:{studentId:{equals:studentId,mode:'insensitive'}}});
+  if(existingStudent)throw profileError(409,'This student ID is already linked to a portal account. Contact your administrator if this is your ID.');
+  return db.user.create({data:{name,email,authId:authUser.id,role:'STUDENT',studentId,department,batch,section},select:userSelect});
 }
 const auth=async(req,res,next)=>{
   try{
@@ -41,10 +51,15 @@ const auth=async(req,res,next)=>{
     catch(e){
       if(e?.code!=='P2002')throw e;
       user=await db.user.findUnique({where:{authId:authUser.id},select:userSelect}); // parallel first requests raced
+      if(!user&&Array.isArray(e.meta?.target)&&e.meta.target.includes('studentId'))
+        return res.status(409).json({error:'This student ID is already linked to a portal account. Contact your administrator if this is your ID.'});
     }
     if(!user)return res.sendStatus(401);
     req.user=user; next();
-  }catch(e){console.error('Auth error:',e?.message||e);return res.sendStatus(401)}
+  }catch(e){
+    if(e?.status)return res.status(e.status).json({error:e.message});
+    console.error('Auth error:',e?.message||e);return res.sendStatus(401);
+  }
 };
 const roles=(...r)=>(req,res,next)=>r.includes(req.user?.role)?next():res.status(403).json({error:'You are not authorized to perform this action.'});
 const jwtSecret=process.env.JWT_SECRET;
@@ -497,7 +512,7 @@ app.get('/api/results',auth,async(req,res)=>res.json(await db.result.findMany({w
 app.get('/api/teachers',auth,async(_,res)=>res.json(await db.user.findMany({where:{role:'TEACHER'},select:{id:true,name:true,department:true,email:true}})));
 app.get('/api/resources',auth,async(_,res)=>res.json(await db.resource.findMany()));
 app.get('/api/questions',auth,async(_,res)=>res.json(await db.question.findMany({take:100})));
-app.get('/api/admin/users',auth,roles('ADMIN'),async(_,res)=>res.json(await db.user.findMany({select:{id:true,name:true,email:true,role:true,department:true,studentId:true}})));
+app.get('/api/admin/users',auth,roles('ADMIN'),async(_,res)=>res.json(await db.user.findMany({select:{id:true,name:true,email:true,role:true,department:true,studentId:true,batch:true,section:true}})));
 app.use((err,req,res,next)=>{console.error(err);res.status(500).json({error:'Internal server error'})});
 const port=process.env.PORT||4000;
 // Vercel runs the exported app itself; only listen when running locally or on a plain Node host.

@@ -2775,7 +2775,7 @@
 
 .login-card {
   width: 100%;
-  max-width: 430px;
+  max-width: 540px;
   background: #ffffff;
   padding: 40px;
   border-radius: 20px;
@@ -2827,6 +2827,16 @@
 
 .login-field {
   margin-bottom: 20px;
+}
+
+.login-registration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 16px;
+}
+
+.login-registration-grid .login-field {
+  min-width: 0;
 }
 
 .login-field label {
@@ -2928,6 +2938,10 @@
 @media (max-width: 500px) {
   .login-card {
     padding: 28px 22px;
+  }
+
+  .login-registration-grid {
+    grid-template-columns: 1fr;
   }
 }
 
