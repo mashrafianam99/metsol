@@ -13,6 +13,7 @@ enum Role {
   STUDENT
   TEACHER
   ADMIN
+  TRANSPORT_ADMIN
 }
 
 enum PaymentStatus {
@@ -33,6 +34,7 @@ model User {
   batch        String?
   section      String?
   phone        String?
+  isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 
   courses                 CourseEnrollment[]
@@ -44,6 +46,9 @@ model User {
   notices                Notice[]               @relation("NoticeAuthor")
   resultImports          ResultImport[]         @relation("ResultImportUploader")
   googleAccountConnection GoogleAccountConnection?
+  transportActivities    TransportActivity[]    @relation("TransportActivityActor")
+  uploadedTransportSchedules TransportSchedule[] @relation("TransportScheduleUploader")
+  notifications          Notification[]
 }
 
 model GoogleAccountConnection {
@@ -147,14 +152,18 @@ model Attendance {
 }
 
 model Notice {
-  id        String   @id @default(cuid())
-  title     String
-  body      String
-  audience  String   @default("ALL")
-  createdAt DateTime @default(now())
-  authorId  String?
+  id                 String   @id @default(cuid())
+  title              String
+  body               String
+  audience           String   @default("ALL")
+  category           String   @default("GENERAL")
+  createdAt          DateTime @default(now())
+  authorId           String?
+  transportScheduleId String?  @unique
 
-  author User? @relation("NoticeAuthor", fields: [authorId], references: [id])
+  author             User?              @relation("NoticeAuthor", fields: [authorId], references: [id])
+  transportSchedule  TransportSchedule? @relation(fields: [transportScheduleId], references: [id], onDelete: SetNull)
+  notifications      Notification[]
 }
 
 model Result {
@@ -230,6 +239,127 @@ model BusLocation {
   latitude  Float
   longitude Float
   updatedAt DateTime @updatedAt
+}
+
+model TransportRoute {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  description        String?
+  startingPoint      String
+  destination        String
+  geometry           Json?
+  geometrySource     String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  buses              Bus[]
+  stops              RouteStop[]
+
+  @@index([updatedAt])
+}
+
+model Bus {
+  id                       String   @id @default(cuid())
+  name                     String
+  number                   String   @unique
+  routeId                  String?
+  startingPoint            String
+  destination              String
+  estimatedDurationMinutes Int
+  operatingDays            String[]
+  morningSchedule          String?
+  afternoonSchedule        String?
+  returnSchedule           String?
+  capacity                 Int?
+  isActive                 Boolean  @default(true)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  route                    TransportRoute? @relation(fields: [routeId], references: [id], onDelete: SetNull)
+
+  @@index([isActive, updatedAt])
+  @@index([routeId])
+}
+
+model BusStop {
+  id          String   @id @default(cuid())
+  name        String
+  latitude    Float
+  longitude   Float
+  area        String
+  osmId       String?
+  description String?
+  landmark    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  routes      RouteStop[]
+
+  @@index([name])
+  @@index([area])
+}
+
+model RouteStop {
+  id           String  @id @default(cuid())
+  routeId      String
+  busStopId    String
+  sequence     Int
+  arrivalTime  String?
+  departureTime String?
+
+  route        TransportRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  busStop      BusStop        @relation(fields: [busStopId], references: [id], onDelete: Restrict)
+
+  @@unique([routeId, sequence])
+  @@unique([routeId, busStopId])
+  @@index([busStopId])
+}
+
+model TransportSchedule {
+  id           String   @id @default(cuid())
+  fileName     String
+  mimeType     String   @default("application/pdf")
+  fileSize     Int
+  fileData     Bytes
+  status       String   @default("DRAFT")
+  uploadedById String
+  createdAt    DateTime @default(now())
+  publishedAt  DateTime?
+
+  uploadedBy   User    @relation("TransportScheduleUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  notice       Notice?
+
+  @@index([status, publishedAt])
+  @@index([createdAt])
+}
+
+model TransportActivity {
+  id          String   @id @default(cuid())
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  summary     String
+  createdAt   DateTime @default(now())
+
+  actor       User?    @relation("TransportActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  noticeId  String
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notice    Notice   @relation(fields: [noticeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, noticeId])
+  @@index([userId, readAt, createdAt])
 }
 
 model FeeInvoice {

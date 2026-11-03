@@ -6,6 +6,7 @@ import { apiFetch, apiUrl, disconnectGoogleClassroom, getAccessToken, getGoogleC
 import "./style.css";
 
 const GRADE_OPTIONS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "D", "F", "I", "W", "S", "AB"];
+const Transport = React.lazy(() => import("./Transport.jsx"));
 
 const calculateCourseSummary = (course = {}) => {
   const creditValue = Number(course.credit);
@@ -92,24 +93,6 @@ const assignments = [
     course: "Data Visualization",
     due: "Oct 15, 2026",
     status: "Pending",
-  },
-];
-
-const notices = [
-  {
-    title: "Midterm Examination Schedule",
-    date: "Oct 2, 2026",
-    text: "The midterm examination schedule has been published.",
-  },
-  {
-    title: "University Bus Schedule",
-    date: "Oct 1, 2026",
-    text: "Updated transportation schedules are now available.",
-  },
-  {
-    title: "Tuition Fee Payment",
-    date: "Sep 29, 2026",
-    text: "Students are requested to complete their semester payments.",
   },
 ];
 
@@ -643,7 +626,7 @@ function App() {
         {active === "Notices" && <Notices />}
         {active === "Resources" && <Resources />}
         {active === "Quiz" && <Quiz />}
-        {active === "Bus Tracking" && <Bus />}
+        {active === "Bus Tracking" && <React.Suspense fallback={<div className="transport-empty">Loading transport…</div>}><Transport user={user} /></React.Suspense>}
         {active === "AI Assistant" && <Assistant />}
       </main>
     </div>
@@ -729,6 +712,21 @@ function GoogleClassroom() {
 }
 
 function Dashboard({ setActive }) {
+  const [recentNotices, setRecentNotices] = useState([]);
+  const [noticeError, setNoticeError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    apiFetch("/api/notices")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load recent notices.");
+        const notices = await response.json();
+        if (active) setRecentNotices(notices.slice(0, 3));
+      })
+      .catch((error) => { if (active) setNoticeError(error.message); });
+    return () => { active = false; };
+  }, []);
+
   return (
     <>
       <section className="welcome-card">
@@ -815,13 +813,15 @@ function Dashboard({ setActive }) {
             <button onClick={() => setActive("Notices")}>View All</button>
           </div>
 
-          {notices.map((notice) => (
-            <div className="notice-row" key={notice.title}>
+          {noticeError && <p role="alert">{noticeError}</p>}
+          {!noticeError && !recentNotices.length && <p>No notices have been published for you.</p>}
+          {recentNotices.map((notice) => (
+            <div className="notice-row" key={notice.id}>
               <div className="notice-dot" />
               <div>
                 <strong>{notice.title}</strong>
-                <span>{notice.text}</span>
-                <small>{notice.date}</small>
+                <span>{notice.body}</span>
+                <small>{new Date(notice.createdAt).toLocaleDateString()}</small>
               </div>
             </div>
           ))}
@@ -2139,14 +2139,50 @@ function OfficialUniversityResult({ onOfficialResult }) {
 }
 
 function Notices() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    apiFetch("/api/notices")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load notices.");
+        const result = await response.json();
+        if (active) setItems(result);
+      })
+      .catch((loadError) => { if (active) setError(loadError.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  async function openSchedule() {
+    try {
+      const response = await apiFetch("/api/transport/schedule/current/pdf");
+      if (!response.ok) throw new Error("The current transport schedule is not available.");
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (scheduleError) {
+      setError(scheduleError.message);
+    }
+  }
+
+  if (loading) return <div className="transport-empty">Loading notices…</div>;
   return (
     <div className="notice-grid">
-      {notices.map((n) => (
-        <div className="card notice-card" key={n.title}>
-          <span className="notice-date">{n.date}</span>
-          <h3>{n.title}</h3>
-          <p>{n.text}</p>
-          <button className="outline-button">Read Notice</button>
+      {error && <div className="transport-alert error" role="alert">{error}</div>}
+      {!items.length && !error && <div className="transport-empty">No notices have been published for you.</div>}
+      {items.map((notice) => (
+        <div className="card notice-card" key={notice.id}>
+          <span className="notice-date">{new Date(notice.createdAt).toLocaleDateString()}</span>
+          <h3>{notice.title}</h3>
+          <p>{notice.body}</p>
+          {notice.transportScheduleId && <button className="outline-button" onClick={openSchedule}>View current transport schedule</button>}
         </div>
       ))}
     </div>
@@ -2204,7 +2240,7 @@ function Quiz() {
   );
 }
 
-function Bus() {
+function LegacyBusDemo() {
   const [updatedAt, setUpdatedAt] = useState(null);
   const stops = [
     { name: "Main Gate", x: 82, y: 274 },

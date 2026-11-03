@@ -7,13 +7,14 @@ import { parseResultLines } from './result-import/resultParser.js';
 import { getAuthenticatedStudentResultFilter } from './result-import/studentResultMatcher.js';
 import { generateAssistantResponse } from './ai.js';
 import { AiDocumentError, extractAiDocument, MAX_AI_DOCUMENT_BYTES, MAX_AI_DOCUMENT_TEXT } from './aiDocuments.js';
+import { createTransportRouter } from './transportRoutes.js';
 import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, syncGoogleClassroomAssignmentsForUser } from './googleClassroom.js';
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client'; import { createClient } from '@supabase/supabase-js';
 const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); app.use(express.json({limit:'2mb'})); app.use(rateLimit({windowMs:15*60*1000,limit:300}));
 const supabaseUrl=process.env.SUPABASE_URL, supabaseAnonKey=process.env.SUPABASE_ANON_KEY;
 if(!supabaseUrl||!supabaseAnonKey)throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set. See backend/.env.example.');
 const supabase=createClient(supabaseUrl,supabaseAnonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
-const userSelect={id:true,name:true,email:true,role:true,studentId:true,department:true,batch:true,section:true};
+const userSelect={id:true,name:true,email:true,role:true,studentId:true,department:true,batch:true,section:true,isActive:true};
 const profileError=(status,message)=>Object.assign(new Error(message),{status});
 // Maps a verified Supabase Auth user to a portal User row (roles and profile data live in our own table).
 async function findOrCreatePortalUser(authUser){
@@ -55,6 +56,7 @@ const auth=async(req,res,next)=>{
         return res.status(409).json({error:'This student ID is already linked to a portal account. Contact your administrator if this is your ID.'});
     }
     if(!user)return res.sendStatus(401);
+    if(!user.isActive)return res.status(403).json({error:'This account is currently inactive. Contact a university administrator.'});
     req.user=user; next();
   }catch(e){
     if(e?.status)return res.status(e.status).json({error:e.message});
@@ -225,10 +227,17 @@ app.delete('/api/google/classroom/disconnect', auth, async (req, res) => {
   }
 });
 app.get('/api/me',auth,(req,res)=>res.json(req.user));
+app.use('/api',createTransportRouter({
+  db,
+  auth,
+  roles,
+  supabaseUrl,
+  serviceRoleKey:process.env.SUPABASE_SERVICE_ROLE_KEY,
+  createClient,
+}));
 app.get('/api/dashboard',auth,async(req,res)=>{const [courses,notices,assignments,payments]=await Promise.all([db.courseEnrollment.count({where:{userId:req.user.id}}),db.notice.findMany({orderBy:{createdAt:'desc'},take:5}),db.assignment.findMany({take:5,orderBy:{dueAt:'asc'}}),db.payment.findMany({where:{studentId:req.user.id},orderBy:{createdAt:'desc'},take:5})]);res.json({courses,notices,assignments,payments})});
 app.get('/api/courses',auth,async(_,res)=>res.json(await db.course.findMany({include:{enrollments:true}})));
 app.post('/api/courses/:id/register',auth,roles('STUDENT'),async(req,res)=>{try{res.json(await db.courseEnrollment.create({data:{userId:req.user.id,courseId:req.params.id,semester:req.body.semester||'Fall 2026'}}))}catch{res.status(409).json({error:'Already registered or course not found'})}});
-app.get('/api/notices',auth,async(req,res)=>res.json(await db.notice.findMany({where:{OR:[{audience:'ALL'},{audience:req.user.role}]},orderBy:{createdAt:'desc'}})));
 app.post('/api/notices',auth,roles('ADMIN','TEACHER'),async(req,res)=>res.status(201).json(await db.notice.create({data:{title:req.body.title,body:req.body.body,audience:req.body.audience||'ALL',authorId:req.user.id}})));
 app.get('/api/assignments',auth,async(_,res)=>res.json(await db.assignment.findMany({include:{course:true},orderBy:{dueAt:'asc'}})));
 app.post('/api/assignments',auth,roles('ADMIN','TEACHER'),async(req,res)=>res.status(201).json(await db.assignment.create({data:{title:req.body.title,description:req.body.description,courseId:req.body.courseId,teacherId:req.user.id,dueAt:req.body.dueAt?new Date(req.body.dueAt):null}})));
