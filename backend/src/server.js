@@ -8,7 +8,7 @@ import { getAuthenticatedStudentResultFilter } from './result-import/studentResu
 import { generateAssistantResponse } from './ai.js';
 import { AiDocumentError, extractAiDocument, MAX_AI_DOCUMENT_BYTES, MAX_AI_DOCUMENT_TEXT } from './aiDocuments.js';
 import { createTransportRouter } from './transportRoutes.js';
-import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, syncGoogleClassroomAssignmentsForUser } from './googleClassroom.js';
+import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, getStudentCourseworkForUser, GoogleReconnectRequiredError } from './googleClassroom.js';
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client'; import { createClient } from '@supabase/supabase-js';
 const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); app.use(express.json({limit:'2mb'})); app.use(rateLimit({windowMs:15*60*1000,limit:300}));
 const supabaseUrl=process.env.SUPABASE_URL, supabaseAnonKey=process.env.SUPABASE_ANON_KEY;
@@ -24,7 +24,8 @@ async function findOrCreatePortalUser(authUser){
   const existing=await db.user.findFirst({where:{email:{equals:email,mode:'insensitive'}}});
   if(existing){
     // Link a pre-existing portal user (e.g. seeded admin) the first time its confirmed email signs in.
-    if(existing.authId&&existing.authId!==authUser.id)return null;
+    if(existing.authId&&existing.authId!==authUser.id)
+      throw profileError(409,'This email is already linked to a different sign-in account. Contact your administrator to re-link it.');
     return db.user.update({where:{id:existing.id},data:{authId:authUser.id},select:userSelect});
   }
   const metadata=authUser.user_metadata||{};
@@ -60,7 +61,10 @@ const auth=async(req,res,next)=>{
     req.user=user; next();
   }catch(e){
     if(e?.status)return res.status(e.status).json({error:e.message});
-    console.error('Auth error:',e?.message||e);return res.sendStatus(401);
+    // A database/server failure is not an authentication failure: report it as such so the
+    // client does not tell a confirmed user to "confirm your email".
+    console.error('Auth error:',e?.message||e);
+    return res.status(500).json({error:'The server could not load your portal profile. Please try again later or contact your administrator.'});
   }
 };
 const roles=(...r)=>(req,res,next)=>r.includes(req.user?.role)?next():res.status(403).json({error:'You are not authorized to perform this action.'});
@@ -130,7 +134,8 @@ app.get('/api/google/classroom/connect', auth, async (req, res) => {
       return res.status(500).json({ error: 'Google Classroom integration is not configured. Add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI to backend/.env.' });
     }
     const state = jwt.sign({ sub: req.user.id, purpose: 'google-classroom', iat: Math.floor(Date.now()/1000) }, jwtSecret, { expiresIn: '10m' });
-    res.redirect(getGoogleClassroomAuthUrl(req.user.id, state));
+    // Returned as JSON: the browser must call this with its bearer token, so it cannot follow a redirect here.
+    res.json({ url: getGoogleClassroomAuthUrl(req.user.email, state) });
   } catch (error) {
     console.error('Google Classroom connect error:', error);
     return res.status(500).json({ error: 'Unable to start the Google Classroom connection flow.' });
@@ -193,13 +198,20 @@ app.get('/api/google/classroom/status', auth, async (req, res) => {
     res.status(500).json({ error: 'Unable to read the Google Classroom connection status.' });
   }
 });
-app.post('/api/google/classroom/sync', auth, async (req, res) => {
+// Live, read-only list of the student's own Classroom coursework; submitting happens in Classroom via each item's link.
+app.get('/api/google/classroom/coursework', auth, async (req, res) => {
   try {
-    const assignments = await syncGoogleClassroomAssignmentsForUser(req.user.id);
-    res.json({ connected: assignments.length > 0 || true, assignments });
+    const coursework = await getStudentCourseworkForUser(req.user.id);
+    if (!coursework) {
+      return res.status(404).json({ error: 'Connect Google Classroom to see your coursework.', code: 'NOT_CONNECTED' });
+    }
+    res.json({ fetchedAt: new Date().toISOString(), coursework });
   } catch (error) {
-    console.error('Google Classroom sync error:', error);
-    res.status(400).json({ error: error.message || 'Unable to sync Classroom assignments.' });
+    if (error instanceof GoogleReconnectRequiredError) {
+      return res.status(409).json({ error: error.message, code: 'RECONNECT_REQUIRED' });
+    }
+    console.error('Google Classroom coursework error:', error?.message || error);
+    res.status(502).json({ error: 'Google Classroom is unavailable right now. Try again in a moment.' });
   }
 });
 app.post('/api/google/classroom/disconnect', auth, async (req, res) => {

@@ -2882,6 +2882,16 @@
   padding: 0;
 }
 
+.login-resend {
+  display: block;
+  margin: -8px 0 18px auto;
+}
+
+.login-resend:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .login-button {
   width: 100%;
   padding: 14px;
@@ -3549,5 +3559,252 @@
 
   body.printing-result .result-print-date {
     margin-top: 18pt;
+  }
+}
+/* GOOGLE CLASSROOM */
+
+.classroom-upcoming {
+  margin-bottom: 20px;
+}
+
+.classroom-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.classroom-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.classroom-message {
+  margin-bottom: 16px;
+}
+
+.classroom-muted {
+  color: #8b95a5;
+  font-size: 12px;
+}
+
+.classroom-empty {
+  max-width: 560px;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.classroom-empty p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.classroom-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.classroom-summary > div {
+  border: 1px solid #e7eaf0;
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.classroom-summary strong {
+  font-size: 22px;
+}
+
+.classroom-summary span {
+  color: #8b95a5;
+  font-size: 11px;
+}
+
+.classroom-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.classroom-filters button {
+  padding: 7px 14px;
+  border-radius: 20px;
+  background: #f1f5f9;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.classroom-filters button.active {
+  background: #2563eb;
+  color: white;
+}
+
+.classroom-list {
+  list-style: none;
+}
+
+.classroom-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0 14px 12px;
+  border-bottom: 1px solid #f0f2f5;
+  border-left: 3px solid transparent;
+}
+
+.classroom-item:last-child {
+  border-bottom: none;
+}
+
+.classroom-item.status-overdue {
+  border-left-color: #dc2626;
+}
+
+.classroom-item.status-due {
+  border-left-color: #2563eb;
+}
+
+.classroom-item.status-turned_in {
+  border-left-color: #16a34a;
+}
+
+.classroom-item-main,
+.classroom-item-side {
+  display: grid;
+  gap: 5px;
+  align-content: start;
+}
+
+.classroom-item-main {
+  min-width: 0;
+}
+
+.classroom-item-main strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.classroom-item-side {
+  justify-items: end;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.classroom-course {
+  color: #8b95a5;
+  font-size: 11px;
+}
+
+.classroom-due {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.classroom-item-side small {
+  font-size: 11px;
+  color: #8b95a5;
+}
+
+.classroom-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.classroom-badge {
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.classroom-badge.overdue {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.classroom-badge.turned_in {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.classroom-badge.no_due_date {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.classroom-badge.lab {
+  background: #faf5ff;
+  color: #7e22ce;
+}
+
+.classroom-link {
+  display: inline-block;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.classroom-link.compact {
+  margin-top: 5px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.classroom-none {
+  padding: 20px 0;
+}
+
+.dark .classroom-summary > div {
+  border-color: #263244;
+}
+
+.dark .classroom-item {
+  border-bottom-color: #1f2937;
+}
+
+.dark .classroom-filters button {
+  background: #1f2937;
+  color: #e5e7eb;
+}
+
+.dark .classroom-filters button.active {
+  background: #2563eb;
+  color: white;
+}
+
+.dark .classroom-badge {
+  background: #1e293b;
+  color: #93c5fd;
+}
+
+.dark .classroom-badge.overdue { color: #fca5a5; }
+.dark .classroom-badge.turned_in { color: #86efac; }
+.dark .classroom-badge.no_due_date { color: #cbd5e1; }
+.dark .classroom-badge.lab { color: #d8b4fe; }
+
+.dark .classroom-link.compact {
+  color: #60a5fa;
+}
+
+@media (max-width: 700px) {
+  .classroom-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .classroom-item {
+    flex-direction: column;
+  }
+
+  .classroom-item-side {
+    justify-items: start;
+    text-align: left;
   }
 }

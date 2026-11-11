@@ -2,8 +2,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { calculateResultSummary, getGradeFromScore, getGradePointForGrade, isEarnedCredit, SPECIAL_GRADES } from "../../shared/grading.js";
 import Login from "./Login.jsx";
-import { apiFetch, apiUrl, disconnectGoogleClassroom, getAccessToken, getGoogleClassroomStatus, redirectToGoogleClassroomConnect, signOut } from "./api.js";
+import ResetPassword, { isPasswordResetUrl } from "./ResetPassword.jsx";
+import { supabase } from "./supabase.js";
+import { apiFetch, apiUrl, getAccessToken, readJson, signOut } from "./api.js";
+import { ClassroomUpcoming, GoogleClassroom } from "./GoogleClassroom.jsx";
+import CommandPalette from "./CommandPalette.jsx";
+import { Icon } from "./icons.jsx";
 import "./style.css";
+import "./theme.css";
 
 const GRADE_OPTIONS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "D", "F", "I", "W", "S", "AB"];
 const Transport = React.lazy(() => import("./Transport.jsx"));
@@ -465,18 +471,95 @@ const facultySources = [
   },
 ];
 
+const THEME_KEY = "mu-theme";
+const SIDEBAR_KEY = "mu-sidebar-collapsed";
+
+// Preferences are a convenience only: storage can be unavailable (private mode, blocked site data).
+function readPreference(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePreference(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore: the preference simply will not persist.
+  }
+}
+
+const NAV_GROUPS = ["Overview", "Academics", "Learning", "Campus Life"];
+const NAV_ITEMS = [
+  { name: "Dashboard", icon: "dashboard", group: "Overview" },
+  { name: "Courses", icon: "book", group: "Academics" },
+  { name: "Teachers", icon: "users", group: "Academics" },
+  { name: "Assignments", icon: "clipboard", group: "Academics" },
+  { name: "Google Classroom", icon: "classroom", group: "Academics" },
+  { name: "Attendance", icon: "calendarCheck", group: "Academics" },
+  { name: "Results", icon: "chart", group: "Academics" },
+  { name: "Resources", icon: "folder", group: "Learning" },
+  { name: "Quiz", icon: "quiz", group: "Learning" },
+  { name: "AI Assistant", icon: "sparkles", group: "Learning" },
+  { name: "Notices", icon: "megaphone", group: "Campus Life" },
+  { name: "Bus Tracking", icon: "bus", group: "Campus Life" },
+  { name: "Payments", icon: "wallet", group: "Campus Life" },
+];
+
 function App() {
-  const [active, setActive] = useState("Dashboard");
-  const [dark, setDark] = useState(false);
+  // Returning from the Google OAuth callback (?googleClassroom=...) should land on the Classroom page.
+  const [active, setActive] = useState(() =>
+    new URLSearchParams(window.location.search).has("googleClassroom") ? "Google Classroom" : "Dashboard"
+  );
+  const [dark, setDark] = useState(() => {
+    const saved = readPreference(THEME_KEY);
+    if (saved) return saved === "dark";
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+  });
+  const [collapsed, setCollapsed] = useState(() => readPreference(SIDEBAR_KEY) === "1");
+  const [navOpen, setNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    writePreference(THEME_KEY, dark ? "dark" : "light");
+  }, [dark]);
+
+  useEffect(() => writePreference(SIDEBAR_KEY, collapsed ? "1" : "0"), [collapsed]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      } else if (event.key === "Escape") {
+        setNavOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const [authLoading, setAuthLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState("");
+  // A password-reset link signs the user in with a recovery session; they must set a new password first.
+  const [isPasswordReset, setIsPasswordReset] = useState(isPasswordResetUrl);
+
+  React.useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") setIsPasswordReset(true);
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
 
     async function restoreSession() {
       try {
+        if (isPasswordResetUrl()) return;
         if (!(await getAccessToken())) return;
 
         const response = await apiFetch("/api/me");
@@ -486,7 +569,8 @@ function App() {
             if (!cancelled) setAuthMessage("Your session expired. Please sign in again.");
             return;
           }
-          throw new Error("Unable to verify your session. Check your connection and try again.");
+          const { error: serverError } = await readJson(response);
+          throw new Error(serverError || "Unable to verify your session. Check your connection and try again.");
         }
 
         const currentUser = await response.json();
@@ -514,8 +598,26 @@ function App() {
     setActive("Dashboard");
   }
 
+  if (isPasswordReset) {
+    return (
+      <ResetPassword
+        onFinished={(message) => {
+          setIsPasswordReset(false);
+          setUser(null);
+          setAuthMessage(message);
+        }}
+      />
+    );
+  }
+
   if (authLoading) {
-    return <div className="login-page" role="status">Restoring your session...</div>;
+    return (
+      <div className="splash" role="status">
+        <img src="/university-logo.png" alt="Metropolitan University" />
+        <div className="splash-bar"><span /></div>
+        <p>Restoring your session…</p>
+      </div>
+    );
   }
 
   if (!user) {
@@ -530,83 +632,105 @@ function App() {
     );
   }
 
-  const menu = [
-    ["Dashboard", "⌂"],
-    ["Courses", "▣"],
-    ["Teachers", "♙"],
-    ["Assignments", "✓"],
-    ["Google Classroom", "▣"],
-    ["Payments", "৳"],
-    ["Attendance", "◷"],
-    ["Results", "▤"],
-    ["Notices", "◉"],
-    ["Resources", "▱"],
-    ["Quiz", "✎"],
-    ["Bus Tracking", "🚌"],
-    ["AI Assistant", "✦"],
-  ];
+  const navigate = (name) => {
+    setActive(name);
+    setNavOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const currentPage = NAV_ITEMS.find((item) => item.name === active) || NAV_ITEMS[0];
+  const initials = user.name?.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "U";
+  const shellClass = ["app", "shell", dark ? "dark" : "", collapsed ? "collapsed" : "", navOpen ? "nav-open" : ""].filter(Boolean).join(" ");
 
   return (
-    <div className={dark ? "app dark" : "app"}>
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-logo">MU</div>
-          <div>
-            <h2>Smart University</h2>
-            <span>Metropolitan University</span>
+    <div className={shellClass}>
+      <div className="sb-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />
+      <aside className="sb" aria-label="Main navigation">
+        <div className="sb-brand">
+          <div className="sb-logo" aria-hidden="true">MU</div>
+          <div className="sb-brand-text">
+            <strong>Smart University</strong>
+            <span>Metropolitan University, Sylhet</span>
           </div>
+          <button
+            type="button"
+            className="sb-collapse"
+            onClick={() => setCollapsed((value) => !value)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <Icon name="chevronsLeft" size={16} />
+          </button>
         </div>
 
-        <div className="profile-mini">
-          <div className="avatar">{user.name?.slice(0, 2).toUpperCase() || "U"}</div>
-          <div>
+        <div className="sb-profile">
+          <div className="sb-avatar">{initials}</div>
+          <div className="sb-profile-text">
             <strong>{user.name}</strong>
-            <span>{user.studentId || user.role}{user.batch ? ` · Batch ${user.batch}` : ""}{user.section ? ` · Section ${user.section}` : ""}</span>
+            <span>{user.studentId || user.role}{user.batch ? ` · Batch ${user.batch}` : ""}{user.section ? ` · Sec ${user.section}` : ""}</span>
           </div>
         </div>
 
-        <nav>
-          {menu.map(([name, icon]) => (
-            <button
-              key={name}
-              className={active === name ? "nav-item active" : "nav-item"}
-              onClick={() => setActive(name)}
-            >
-              <span>{icon}</span>
-              {name}
-            </button>
+        <nav className="sb-nav">
+          {NAV_GROUPS.map((group) => (
+            <div className="sb-group" key={group}>
+              <span className="sb-group-label">{group}</span>
+              {NAV_ITEMS.filter((item) => item.group === group).map((item) => (
+                <button
+                  key={item.name}
+                  type="button"
+                  className={active === item.name ? "sb-item active" : "sb-item"}
+                  aria-current={active === item.name ? "page" : undefined}
+                  onClick={() => navigate(item.name)}
+                  data-tip={item.name}
+                >
+                  <Icon name={item.icon} size={18} />
+                  <span>{item.name}</span>
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 
-        <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setDark(!dark)}>
-            <span>{dark ? "☀" : "☾"}</span>
-            {dark ? "Light Mode" : "Dark Mode"}
-          </button>
-
-          <button className="nav-item">
-            <span>⚙</span>
-            Settings
-          </button>
-          <button className="nav-item" onClick={handleLogout}>
-            <span>↪</span>
-            Sign Out
+        <div className="sb-footer">
+          <button type="button" className="sb-item" onClick={handleLogout} data-tip="Sign out">
+            <Icon name="logout" size={18} />
+            <span>Sign out</span>
           </button>
         </div>
       </aside>
 
-      <main className="main">
-        <header className={active === "Bus Tracking" ? "topbar bus-topbar" : "topbar"}>
-          <div>
+      <main className="shell-main">
+        <header className="shell-topbar">
+          <button type="button" className="tb-icon tb-menu" onClick={() => setNavOpen(true)} aria-label="Open navigation">
+            <Icon name="menu" size={20} />
+          </button>
+          <div className="tb-title">
+            <span className="tb-crumb">{currentPage.group}</span>
             <h1>{active}</h1>
-            <p>Welcome back! Here's what's happening today.</p>
           </div>
 
-          <div className="top-actions">
-            <button className="icon-button">🔔</button>
-            <button className="auth-toggle-button" onClick={handleLogout}>Sign out</button>
-            <div className="top-profile">
-              <div className="avatar small">{user.name?.slice(0, 2).toUpperCase() || "U"}</div>
+          <button type="button" className="tb-search" onClick={() => setPaletteOpen(true)}>
+            <Icon name="search" size={16} />
+            <span>Search pages…</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+
+          <div className="tb-actions">
+            <button
+              type="button"
+              className="tb-icon theme-toggle"
+              onClick={() => setDark((value) => !value)}
+              aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+              title={dark ? "Light mode" : "Dark mode"}
+            >
+              <Icon name={dark ? "sun" : "moon"} size={18} />
+            </button>
+            <button type="button" className="tb-icon" onClick={() => navigate("Notices")} aria-label="Notices" title="Notices">
+              <Icon name="bell" size={18} />
+              <i className="tb-dot" />
+            </button>
+            <div className="tb-profile">
+              <div className="sb-avatar small">{initials}</div>
               <div>
                 <strong>{user.name}</strong>
                 <span>{user.department || user.role}</span>
@@ -615,104 +739,40 @@ function App() {
           </div>
         </header>
 
-        {active === "Dashboard" && <Dashboard setActive={setActive} />}
-        {active === "Courses" && <Courses />}
-        {active === "Teachers" && <Teachers />}
-        {active === "Assignments" && <Assignments user={user} />}
-        {active === "Google Classroom" && <GoogleClassroom />}
-        {active === "Payments" && <Payments />}
-        {active === "Attendance" && <Attendance />}
-        {active === "Results" && <Results key={user.role} user={user} />}
-        {active === "Notices" && <Notices />}
-        {active === "Resources" && <Resources />}
-        {active === "Quiz" && <Quiz />}
-        {active === "Bus Tracking" && <React.Suspense fallback={<div className="transport-empty">Loading transport…</div>}><Transport user={user} /></React.Suspense>}
-        {active === "AI Assistant" && <Assistant />}
+        <div className="page-view" key={active}>
+          {active === "Dashboard" && <Dashboard setActive={navigate} user={user} />}
+          {active === "Courses" && <Courses />}
+          {active === "Teachers" && <Teachers />}
+          {active === "Assignments" && <Assignments user={user} />}
+          {active === "Google Classroom" && <GoogleClassroom />}
+          {active === "Payments" && <Payments />}
+          {active === "Attendance" && <Attendance />}
+          {active === "Results" && <Results key={user.role} user={user} />}
+          {active === "Notices" && <Notices />}
+          {active === "Resources" && <Resources />}
+          {active === "Quiz" && <Quiz />}
+          {active === "Bus Tracking" && <React.Suspense fallback={<div className="transport-empty">Loading transport…</div>}><Transport user={user} /></React.Suspense>}
+          {active === "AI Assistant" && <Assistant />}
+        </div>
       </main>
+
+      <CommandPalette open={paletteOpen} items={NAV_ITEMS} onSelect={navigate} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }
 
-function GoogleClassroom() {
-  const [status, setStatus] = useState({ connected: false });
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
-
-  const refreshStatus = async () => {
-    try {
-      setLoading(true);
-      const data = await getGoogleClassroomStatus();
-      setStatus(data || { connected: false });
-      setMessage("");
-    } catch (error) {
-      setMessage(error.message || "Unable to load Google Classroom status.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const connectionState = query.get("googleClassroom");
-    if (connectionState === "connected") {
-      setMessage("Google Classroom connected successfully.");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-    if (connectionState === "error") {
-      setMessage("Google Classroom connection failed. Check your Google OAuth settings and try again.");
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-    refreshStatus();
-  }, []);
-
-  const handleDisconnect = async () => {
-    try {
-      setMessage("Disconnecting Google Classroom...");
-      await disconnectGoogleClassroom();
-      setStatus({ connected: false });
-      setMessage("Google Classroom disconnected successfully.");
-    } catch (error) {
-      setMessage(error.message || "Unable to disconnect Google Classroom.");
-    }
-  };
-
-  return (
-    <section className="card" style={{ maxWidth: 720 }}>
-      <div className="page-intro">
-        <h2>Google Classroom</h2>
-        <p>Connect your Google account to sync course work and assignments with the portal.</p>
-      </div>
-
-      {message && <div className="form-message" style={{ marginBottom: 16 }}>{message}</div>}
-
-      {loading ? (
-        <p>Loading Classroom connection status...</p>
-      ) : status.connected ? (
-        <div>
-          <div className="course-row" style={{ marginBottom: 20 }}>
-            <div className="course-icon">✅</div>
-            <div className="course-info">
-              <strong>Connected</strong>
-              <span>{status.email || "Google account linked"}</span>
-            </div>
-          </div>
-          <div className="quick-grid" style={{ justifyContent: "flex-start" }}>
-            <button className="outline-button" onClick={handleDisconnect}>Disconnect</button>
-            <button className="primary-button" onClick={() => redirectToGoogleClassroomConnect()}>Reconnect</button>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <p>Google Classroom is not connected yet.</p>
-          <button className="primary-button" onClick={() => redirectToGoogleClassroomConnect()}>Connect Google Classroom</button>
-        </div>
-      )}
-    </section>
-  );
+function greetingFor(date) {
+  const hour = date.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 }
 
-function Dashboard({ setActive }) {
+function Dashboard({ setActive, user }) {
   const [recentNotices, setRecentNotices] = useState([]);
+  const now = new Date();
+  const firstName = user?.name?.trim().split(/\s+/)[0] || "Student";
+  const today = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const [noticeError, setNoticeError] = useState("");
 
   useEffect(() => {
@@ -729,24 +789,36 @@ function Dashboard({ setActive }) {
 
   return (
     <>
-      <section className="welcome-card">
-        <div>
-          <span className="eyebrow">THURSDAY, OCTOBER 3, 2026</span>
-          <h2>Good afternoon, Student 👋</h2>
+      <section className="hero-card">
+        <div className="hero-copy">
+          <span className="hero-date"><Icon name="clock" size={14} />{today}</span>
+          <h2>{greetingFor(now)}, {firstName}</h2>
           <p>
             Keep track of your courses, assignments, attendance and university
             activities from one place.
           </p>
+          <div className="hero-actions">
+            <button type="button" className="hero-btn primary" onClick={() => setActive("Assignments")}>
+              View assignments <Icon name="arrowRight" size={16} />
+            </button>
+            <button type="button" className="hero-btn ghost" onClick={() => setActive("AI Assistant")}>
+              <Icon name="sparkles" size={16} /> Ask EduAI
+            </button>
+          </div>
         </div>
-        <div className="welcome-icon">🎓</div>
+        <div className="hero-art" aria-hidden="true">
+          <img src="/campus/mu-seminar.jpg" alt="" />
+        </div>
       </section>
 
       <section className="stats-grid">
-        <Stat icon="📚" title="Enrolled Courses" value="6" />
-        <Stat icon="📝" title="Assignments" value="8" />
-        <Stat icon="◷" title="Attendance" value="87%" />
-        <Stat icon="💳" title="Due Payment" value="৳12,500" />
+        <Stat icon="book" tone="indigo" title="Enrolled Courses" value={6} hint="This semester" />
+        <Stat icon="clipboard" tone="amber" title="Assignments" value={8} hint="2 due this week" />
+        <Stat icon="calendarCheck" tone="green" title="Attendance" value={87} suffix="%" hint="Above 75% minimum" meter={87} />
+        <Stat icon="wallet" tone="red" title="Due Payment" value={12500} prefix="৳" hint="Semester fee" />
       </section>
+
+      <ClassroomUpcoming onOpen={() => setActive("Google Classroom")} />
 
       <div className="dashboard-grid">
         <section className="card">
@@ -761,7 +833,7 @@ function Dashboard({ setActive }) {
           <div className="course-list">
             {courses.slice(0, 3).map((course) => (
               <div className="course-row" key={course.code}>
-                <div className="course-icon">📘</div>
+                <div className="course-icon"><Icon name="book" size={18} /></div>
                 <div className="course-info">
                   <strong>{course.code}</strong>
                   <span>{course.title}</span>
@@ -831,11 +903,19 @@ function Dashboard({ setActive }) {
           <h3>Quick Actions</h3>
 
           <div className="quick-grid">
-            <button onClick={() => setActive("Payments")}>💳<span>Pay Fees</span></button>
-            <button onClick={() => setActive("Assignments")}>📝<span>Assignments</span></button>
-            <button onClick={() => setActive("Google Classroom")}>📚<span>Classroom</span></button>
-            <button onClick={() => setActive("Results")}>📊<span>View Results</span></button>
-            <button onClick={() => setActive("AI Assistant")}>✦<span>Ask AI</span></button>
+            {[
+              ["Payments", "wallet", "Pay Fees"],
+              ["Assignments", "clipboard", "Assignments"],
+              ["Google Classroom", "classroom", "Classroom"],
+              ["Results", "chart", "View Results"],
+              ["Bus Tracking", "bus", "Track Bus"],
+              ["AI Assistant", "sparkles", "Ask AI"],
+            ].map(([page, icon, label]) => (
+              <button type="button" key={page} onClick={() => setActive(page)}>
+                <span className="quick-icon"><Icon name={icon} size={20} /></span>
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
         </section>
       </div>
@@ -843,14 +923,42 @@ function Dashboard({ setActive }) {
   );
 }
 
-function Stat({ icon, title, value }) {
+const COUNT_UP_MS = 900;
+
+// Eases a number from 0 to `target`; honours reduced-motion by jumping straight to the value.
+function useCountUp(target) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setValue(target);
+      return undefined;
+    }
+    let frame;
+    const start = performance.now();
+    const tick = (time) => {
+      const progress = Math.min((time - start) / COUNT_UP_MS, 1);
+      setValue(Math.round(target * (1 - (1 - progress) ** 3)));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+  return value;
+}
+
+function Stat({ icon, tone = "indigo", title, value, prefix = "", suffix = "", hint, meter }) {
+  const animated = useCountUp(value);
   return (
-    <div className="stat-card">
-      <div className="stat-icon">{icon}</div>
-      <div>
-        <span>{title}</span>
-        <strong>{value}</strong>
+    <div className={`stat-card tone-${tone}`}>
+      <div className="stat-top">
+        <div className="stat-icon"><Icon name={icon} size={20} /></div>
+        <span className="stat-title">{title}</span>
       </div>
+      <strong className="stat-value">{prefix}{animated.toLocaleString()}{suffix}</strong>
+      {meter !== undefined && (
+        <div className="stat-meter" aria-hidden="true"><i style={{ width: `${meter}%` }} /></div>
+      )}
+      {hint && <small className="stat-hint">{hint}</small>}
     </div>
   );
 }
@@ -1309,7 +1417,7 @@ function Payments() {
           }
         );
     
-        const data = await response.json();
+        const data = await readJson(response);
     
         if (!response.ok) {
           setPaymentMessage(
@@ -1330,9 +1438,9 @@ function Payments() {
   return (
     <>
       <div className="stats-grid">
-        <Stat icon="💰" title="Semester Fee" value="৳45,000" />
-        <Stat icon="✓" title="Paid" value="৳32,500" />
-        <Stat icon="!" title="Remaining" value="৳12,500" />
+        <Stat icon="wallet" tone="indigo" title="Semester Fee" value={45000} prefix="৳" hint="Spring semester" />
+        <Stat icon="check" tone="green" title="Paid" value={32500} prefix="৳" hint="72% of total" meter={72} />
+        <Stat icon="alert" tone="red" title="Remaining" value={12500} prefix="৳" hint="Due before exams" />
       </div>
 
       <div className="card">
@@ -1398,11 +1506,7 @@ function Payments() {
       <div className="payment-actions">
         <button
           className="primary-button"
-          onClick={() => {
-            setPaymentMessage(
-              "Payment request created successfully. Status: PENDING"
-            );
-          }}
+          onClick={handlePayment}
         >
           Pay Now
         </button>
@@ -2191,17 +2295,17 @@ function Notices() {
 
 function Resources() {
   const resources = [
-    ["📄", "AI Lecture Notes", "Artificial Intelligence"],
-    ["📊", "Database ER Diagram", "Database Management"],
-    ["📚", "Software Engineering Book", "Software Engineering"],
-    ["🎥", "Data Visualization Lecture", "Data Visualization"],
+    ["fileText", "AI Lecture Notes", "Artificial Intelligence"],
+    ["chart", "Database ER Diagram", "Database Management"],
+    ["book", "Software Engineering Book", "Software Engineering"],
+    ["video", "Data Visualization Lecture", "Data Visualization"],
   ];
 
   return (
     <div className="resource-grid">
       {resources.map((r) => (
         <div className="card resource-card" key={r[1]}>
-          <div className="resource-icon">{r[0]}</div>
+          <div className="resource-icon"><Icon name={r[0]} size={20} /></div>
           <h3>{r[1]}</h3>
           <span>{r[2]}</span>
           <button className="outline-button">Open Resource</button>
@@ -2416,7 +2520,7 @@ function Assistant() {
           documentText: uploadedDocument?.text || "",
         }),
       });
-      const data = await response.json();
+      const data = await readJson(response);
       if (!response.ok) {
         throw new Error(data.error || "Unable to get an AI response.");
       }
@@ -2446,7 +2550,7 @@ function Assistant() {
         method: "POST",
         body: formData,
       });
-      const data = await response.json();
+      const data = await readJson(response);
       if (!response.ok) {
         throw new Error(data.error || "Unable to read this document.");
       }

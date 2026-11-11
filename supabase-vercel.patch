@@ -1,0 +1,596 @@
+diff --git a/SUPABASE_VERCEL_SETUP.md b/SUPABASE_VERCEL_SETUP.md
+new file mode 100644
+index 0000000..dc8e625
+--- /dev/null
++++ b/SUPABASE_VERCEL_SETUP.md
+@@ -0,0 +1,68 @@
++# Supabase + Vercel setup
++
++The portal runs as two Vercel projects from this one repo (`backend/` and `frontend/`), with Supabase for the database and login.
++
++## 1. Create the Supabase project
++
++1. Create a project at supabase.com and save the database password.
++2. **Project Settings → API**: copy the **Project URL** and the **anon public key**.
++3. **Project Settings → Database → Connection string**:
++   - **Transaction pooler** (port 6543) is `DATABASE_URL`. Append `?pgbouncer=true&connection_limit=1`.
++   - **Session pooler** (port 5432) or the direct connection is `DIRECT_URL`. Prisma migrations use it.
++4. **Authentication → Providers → Email**: keep it enabled. Keep **Confirm email** on. The backend only accepts confirmed emails.
++5. **Authentication → URL Configuration**: set the **Site URL** to your frontend URL (e.g. `https://metsol.vercel.app`).
++
++## 2. Create the tables (run once, from your computer)
++
++```bash
++cd backend
++cp .env.example .env        # fill in DATABASE_URL, DIRECT_URL, SUPABASE_URL, SUPABASE_ANON_KEY, JWT_SECRET
++npm install
++npx prisma migrate deploy   # creates every table, including the new authId column
++npm run seed                # optional demo data
++```
++
++Use `migrate deploy`, not `migrate dev`, against Supabase.
++
++## 3. How login works now
++
++- The browser signs in or signs up with Supabase Auth, which stores passwords and issues the session.
++- Every API call sends the Supabase access token. The backend verifies it with Supabase.
++- On the first request, the backend creates or links a row in the `User` table. **Roles (STUDENT / TEACHER / ADMIN) still live in that table.**
++- New accounts are STUDENT. To make someone an admin or teacher, change `role` in the `User` table (Supabase **Table Editor**).
++- Seeded demo users (e.g. `admin@university.test`) link to Supabase the first time that email signs up and confirms. Their seed passwords no longer work.
++
++## 4. Deploy the backend on Vercel
++
++1. **Add New → Project**, import this repo, **Root Directory = `backend`**.
++2. Under Settings → General, keep **Include source files outside of the Root Directory** enabled. The backend imports `../shared/grading.js`.
++3. Environment variables (Production):
++
++   | Name | Value |
++   |---|---|
++   | `DATABASE_URL` | pooled URL (port 6543) |
++   | `DIRECT_URL` | direct/session URL (port 5432) |
++   | `SUPABASE_URL` | Project URL |
++   | `SUPABASE_ANON_KEY` | anon key |
++   | `JWT_SECRET` | random string, 32+ characters |
++   | `FRONTEND_URL` | the frontend's Vercel URL, no trailing slash |
++   | `GROQ_API_KEY`, bKash/Nagad, Google keys | as needed |
++
++4. Deploy. The Express app is detected through `src/server.js`. `prisma generate` runs automatically through `postinstall`.
++5. Check `https://<backend>.vercel.app/api/me`: it should return 401 without a login.
++
++## 5. Deploy the frontend on Vercel
++
++1. **Add New → Project**, same repo, **Root Directory = `frontend`**, framework **Vite**.
++2. Environment variables:
++   - `VITE_API_URL` = the backend's Vercel URL (no trailing slash)
++   - `VITE_SUPABASE_URL` = Project URL
++   - `VITE_SUPABASE_ANON_KEY` = anon key
++3. Deploy, then put the frontend URL into the backend's `FRONTEND_URL` and redeploy the backend.
++
++## Known limits on Vercel
++
++- Vercel functions accept request bodies up to about 4.5 MB, so large result PDFs and AI documents may fail.
++- The in-memory rate limiter is per function instance. It is only a soft limit on Vercel.
++- If you use Google Classroom, set `GOOGLE_REDIRECT_URI` to `https://<backend>.vercel.app/api/google/classroom/callback` and add it in Google Cloud Console.
++- Use a separate Supabase project (or a Preview-only `DATABASE_URL`) for Vercel preview deployments, so a preview can't touch production data.
+diff --git a/backend/.env.example b/backend/.env.example
+index fcfc565..00846b6 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -1,6 +1,15 @@
+-DATABASE_URL="postgresql://postgres:1216@localhost:5432/smart_university?schema=public"
++# --- Supabase (Project Settings -> Database / API) ---
++# Pooled connection (Transaction pooler, port 6543) - used by the running app.
++DATABASE_URL="postgresql://postgres.YOUR_PROJECT_REF:YOUR_DB_PASSWORD@aws-0-REGION.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1"
++# Direct connection (port 5432 / Session pooler) - used by prisma migrate.
++DIRECT_URL="postgresql://postgres.YOUR_PROJECT_REF:YOUR_DB_PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres"
++SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
++SUPABASE_ANON_KEY="your-supabase-anon-key"
++
+ PORT=4000
++# Still used to sign the short-lived Google Classroom OAuth state value.
+ JWT_SECRET="replace-this-with-a-random-secret-of-at-least-32-characters"
++# Comma-free single origin of the deployed frontend, e.g. https://metsol.vercel.app
+ FRONTEND_URL="http://localhost:5173"
+ GROQ_API_KEY=""
+ GROQ_MODEL="openai/gpt-oss-20b"
+diff --git a/backend/package.json b/backend/package.json
+index ba849ca..c375a21 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -9,10 +9,13 @@
+     "seed": "node --env-file=.env prisma/seed.js",
+     "test": "node --test",
+     "db:generate": "prisma generate",
+-    "db:migrate": "prisma migrate dev"
++    "db:migrate": "prisma migrate dev",
++    "postinstall": "prisma generate",
++    "db:deploy": "prisma migrate deploy"
+   },
+   "dependencies": {
+     "@prisma/client": "^6.16.2",
++    "@supabase/supabase-js": "^2.58.0",
+     "bcryptjs": "^3.0.2",
+     "cors": "^2.8.5",
+     "dotenv": "^16.6.1",
+@@ -24,11 +27,9 @@
+     "mammoth": "^1.13.0",
+     "multer": "^2.0.2",
+     "pdfjs-dist": "^4.10.38",
++    "prisma": "^6.16.2",
+     "zod": "^4.1.5"
+   },
+-  "devDependencies": {
+-    "prisma": "^6.16.2"
+-  },
+   "overrides": {
+     "sprintf-js": "^1.1.3"
+   }
+diff --git a/backend/prisma/migrations/20261027000000_supabase_auth/migration.sql b/backend/prisma/migrations/20261027000000_supabase_auth/migration.sql
+new file mode 100644
+index 0000000..b844f9a
+--- /dev/null
++++ b/backend/prisma/migrations/20261027000000_supabase_auth/migration.sql
+@@ -0,0 +1,4 @@
++-- Supabase Auth now owns passwords. Link each portal user to its Supabase auth user.
++ALTER TABLE "User" ALTER COLUMN "passwordHash" DROP NOT NULL;
++ALTER TABLE "User" ADD COLUMN "authId" TEXT;
++CREATE UNIQUE INDEX "User_authId_key" ON "User"("authId");
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index cbe090b..335062b 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -1,10 +1,12 @@
+ generator client {
+-  provider = "prisma-client-js"
++  provider      = "prisma-client-js"
++  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+ }
+ 
+ datasource db {
+-  provider = "postgresql"
+-  url      = env("DATABASE_URL")
++  provider  = "postgresql"
++  url       = env("DATABASE_URL")
++  directUrl = env("DIRECT_URL")
+ }
+ 
+ enum Role {
+@@ -23,7 +25,8 @@ model User {
+   id           String   @id @default(cuid())
+   name         String
+   email        String   @unique
+-  passwordHash String
++  passwordHash String?
++  authId       String?  @unique
+   role         Role     @default(STUDENT)
+   studentId    String?
+   department   String?
+diff --git a/backend/src/server.js b/backend/src/server.js
+index bfb9d67..605599b 100644
+--- a/backend/src/server.js
++++ b/backend/src/server.js
+@@ -8,9 +8,44 @@ import { getAuthenticatedStudentResultFilter } from './result-import/studentResu
+ import { generateAssistantResponse } from './ai.js';
+ import { AiDocumentError, extractAiDocument, MAX_AI_DOCUMENT_BYTES, MAX_AI_DOCUMENT_TEXT } from './aiDocuments.js';
+ import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, syncGoogleClassroomAssignmentsForUser } from './googleClassroom.js';
+-import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import bcrypt from 'bcryptjs'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client';
++import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client'; import { createClient } from '@supabase/supabase-js';
+ const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); app.use(express.json({limit:'2mb'})); app.use(rateLimit({windowMs:15*60*1000,limit:300}));
+-const auth=async(req,res,next)=>{try{const token=(req.headers.authorization||'').replace(/^Bearer /,''); const p=jwt.verify(token,process.env.JWT_SECRET); req.user=await db.user.findUnique({where:{id:p.sub},select:{id:true,name:true,email:true,role:true,studentId:true,department:true}}); if(!req.user)return res.sendStatus(401); next();}catch{return res.sendStatus(401)}};
++const supabaseUrl=process.env.SUPABASE_URL, supabaseAnonKey=process.env.SUPABASE_ANON_KEY;
++if(!supabaseUrl||!supabaseAnonKey)throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set. See backend/.env.example.');
++const supabase=createClient(supabaseUrl,supabaseAnonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
++const userSelect={id:true,name:true,email:true,role:true,studentId:true,department:true};
++// Maps a verified Supabase Auth user to a portal User row (roles and profile data live in our own table).
++async function findOrCreatePortalUser(authUser){
++  const email=authUser.email.toLowerCase();
++  const byAuthId=await db.user.findUnique({where:{authId:authUser.id},select:userSelect});
++  if(byAuthId)return byAuthId;
++  const existing=await db.user.findFirst({where:{email:{equals:email,mode:'insensitive'}}});
++  if(existing){
++    // Link a pre-existing portal user (e.g. seeded admin) the first time its confirmed email signs in.
++    if(existing.authId&&existing.authId!==authUser.id)return null;
++    return db.user.update({where:{id:existing.id},data:{authId:authUser.id},select:userSelect});
++  }
++  const name=String(authUser.user_metadata?.name||email.split('@')[0]).trim().slice(0,100)||email.split('@')[0];
++  return db.user.create({data:{name,email,authId:authUser.id,role:'STUDENT'},select:userSelect});
++}
++const auth=async(req,res,next)=>{
++  try{
++    const token=(req.headers.authorization||'').replace(/^Bearer /,'');
++    if(!token)return res.sendStatus(401);
++    const {data,error}=await supabase.auth.getUser(token);
++    const authUser=data?.user;
++    // An unconfirmed email must never be linked to an existing portal account.
++    if(error||!authUser?.email||!authUser.email_confirmed_at)return res.sendStatus(401);
++    let user;
++    try{user=await findOrCreatePortalUser(authUser)}
++    catch(e){
++      if(e?.code!=='P2002')throw e;
++      user=await db.user.findUnique({where:{authId:authUser.id},select:userSelect}); // parallel first requests raced
++    }
++    if(!user)return res.sendStatus(401);
++    req.user=user; next();
++  }catch(e){console.error('Auth error:',e?.message||e);return res.sendStatus(401)}
++};
+ const roles=(...r)=>(req,res,next)=>r.includes(req.user?.role)?next():res.status(403).json({error:'You are not authorized to perform this action.'});
+ const jwtSecret=process.env.JWT_SECRET;
+ if(!jwtSecret||jwtSecret.length<32||jwtSecret.startsWith('replace-this-'))throw new Error('JWT_SECRET must be set to a random string of at least 32 characters. See backend/.env.example.');
+@@ -174,58 +209,6 @@ app.delete('/api/google/classroom/disconnect', auth, async (req, res) => {
+     res.status(500).json({ error: 'Unable to disconnect the Google Classroom account.' });
+   }
+ });
+-app.post('/api/auth/login',async(req,res)=>{
+-  const {email,password}=req.body||{};
+-  const normalizedEmail=typeof email==='string'?email.trim().toLowerCase():'';
+-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)||normalizedEmail.length>320||typeof password!=='string'||!password||password.length>1024)
+-    return res.status(400).json({error:'Enter a valid email address and password'});
+-  let user=await db.user.findFirst({where:{email:{equals:normalizedEmail,mode:'insensitive'}}});
+-  let created=false;
+-  if(!user){
+-    if(password.length<8)return res.status(400).json({error:'For a new account, choose a password with at least 8 characters'});
+-    try {
+-      user=await db.user.create({data:{
+-        name:normalizedEmail.split('@')[0],
+-        email:normalizedEmail,
+-        passwordHash:await bcrypt.hash(password,12),
+-        role:'STUDENT'
+-      }});
+-      created=true;
+-    } catch(error) {
+-      if(error?.code!=='P2002')throw error;
+-      user=await db.user.findFirst({where:{email:{equals:normalizedEmail,mode:'insensitive'}}});
+-      if(!user||!await bcrypt.compare(password,user.passwordHash))return res.status(401).json({error:'Invalid email or password'});
+-    }
+-  } else if(!await bcrypt.compare(password,user.passwordHash)) {
+-    return res.status(401).json({error:'Invalid email or password'});
+-  }
+-  const token=jwt.sign({sub:user.id},jwtSecret,{expiresIn:'12h'});
+-  res.status(created?201:200).json({token,created,user:{id:user.id,name:user.name,email:user.email,role:user.role,studentId:user.studentId,department:user.department}});
+-});
+-app.post('/api/auth/register',async(req,res)=>{
+-  const {name,email,password}=req.body||{};
+-  const normalizedName=typeof name==='string'?name.trim():'';
+-  const normalizedEmail=typeof email==='string'?email.trim().toLowerCase():'';
+-  if(!normalizedName||normalizedName.length>100||! /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)||normalizedEmail.length>320)
+-    return res.status(400).json({error:'Enter your name and a valid email address'});
+-  if(typeof password!=='string'||password.length<8||password.length>1024)
+-    return res.status(400).json({error:'Password must be between 8 and 1024 characters'});
+-  const existingUser=await db.user.findFirst({where:{email:{equals:normalizedEmail,mode:'insensitive'}}});
+-  if(existingUser)return res.status(409).json({error:'An account with this email already exists. Sign in instead.'});
+-  try {
+-    const user=await db.user.create({data:{
+-      name:normalizedName,
+-      email:normalizedEmail,
+-      passwordHash:await bcrypt.hash(password,12),
+-      role:'STUDENT'
+-    }});
+-    const token=jwt.sign({sub:user.id},jwtSecret,{expiresIn:'12h'});
+-    return res.status(201).json({token,user:{id:user.id,name:user.name,email:user.email,role:user.role,studentId:user.studentId,department:user.department}});
+-  } catch(error) {
+-    if(error?.code==='P2002')return res.status(409).json({error:'An account with this email already exists. Sign in instead.'});
+-    throw error;
+-  }
+-});
+ app.get('/api/me',auth,(req,res)=>res.json(req.user));
+ app.get('/api/dashboard',auth,async(req,res)=>{const [courses,notices,assignments,payments]=await Promise.all([db.courseEnrollment.count({where:{userId:req.user.id}}),db.notice.findMany({orderBy:{createdAt:'desc'},take:5}),db.assignment.findMany({take:5,orderBy:{dueAt:'asc'}}),db.payment.findMany({where:{studentId:req.user.id},orderBy:{createdAt:'desc'},take:5})]);res.json({courses,notices,assignments,payments})});
+ app.get('/api/courses',auth,async(_,res)=>res.json(await db.course.findMany({include:{enrollments:true}})));
+@@ -516,4 +499,7 @@ app.get('/api/resources',auth,async(_,res)=>res.json(await db.resource.findMany(
+ app.get('/api/questions',auth,async(_,res)=>res.json(await db.question.findMany({take:100})));
+ app.get('/api/admin/users',auth,roles('ADMIN'),async(_,res)=>res.json(await db.user.findMany({select:{id:true,name:true,email:true,role:true,department:true,studentId:true}})));
+ app.use((err,req,res,next)=>{console.error(err);res.status(500).json({error:'Internal server error'})});
+-const port=process.env.PORT||4000; app.listen(port,()=>console.log(`Portal API running on http://localhost:${port}`));
++const port=process.env.PORT||4000;
++// Vercel runs the exported app itself; only listen when running locally or on a plain Node host.
++if(!process.env.VERCEL)app.listen(port,()=>console.log(`Portal API running on http://localhost:${port}`));
++export default app;
+diff --git a/frontend/.env.example b/frontend/.env.example
+index 93c03d1..105c9e4 100644
+--- a/frontend/.env.example
++++ b/frontend/.env.example
+@@ -1,3 +1,6 @@
+ # Leave empty to use the Vite development proxy or a same-origin /api deployment.
+-# For a separately hosted backend, use its origin without a trailing slash or /api.
++# For a separately hosted backend (e.g. the backend's Vercel URL), use its origin without a trailing slash or /api.
+ VITE_API_URL=
++# Supabase Project Settings -> API
++VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
++VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+diff --git a/frontend/package.json b/frontend/package.json
+index fe64e42..d3107b3 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -4,13 +4,14 @@
+     "version": "1.0.0",
+     "type": "module",
+     "scripts": {
+-      "dev": "vite",
+-      "build": "vite build",
+-      "preview": "vite preview"
++        "dev": "vite",
++        "build": "vite build",
++        "preview": "vite preview"
+     },
+     "dependencies": {
+-      "react": "^19.0.0",
+-      "react-dom": "^19.0.0",
+-      "vite": "^7.0.0"
++        "@supabase/supabase-js": "^2.118.0",
++        "react": "^19.0.0",
++        "react-dom": "^19.0.0",
++        "vite": "^7.0.0"
+     }
+-  }
+\ No newline at end of file
++}
+diff --git a/frontend/src/Login.jsx b/frontend/src/Login.jsx
+index 4a29888..9c03fbc 100644
+--- a/frontend/src/Login.jsx
++++ b/frontend/src/Login.jsx
+@@ -1,5 +1,6 @@
+ import React, { useState } from "react";
+-import { apiFetch, saveAuthToken } from "./api.js";
++import { apiFetch } from "./api.js";
++import { supabase } from "./supabase.js";
+ 
+ export default function Login({ onLogin, message = "" }) {
+   const [isRegistering, setIsRegistering] = useState(false);
+@@ -7,13 +8,14 @@ export default function Login({ onLogin, message = "" }) {
+   const [email, setEmail] = useState("");
+   const [password, setPassword] = useState("");
+   const [confirmPassword, setConfirmPassword] = useState("");
+-  const [rememberMe, setRememberMe] = useState(false);
+   const [error, setError] = useState("");
++  const [notice, setNotice] = useState("");
+   const [isSubmitting, setIsSubmitting] = useState(false);
+ 
+   const handleSubmit = async (event) => {
+     event.preventDefault();
+     setError("");
++    setNotice("");
+ 
+     const normalizedEmail = email.trim();
+     if (isRegistering && !name.trim()) {
+@@ -35,32 +37,38 @@ export default function Login({ onLogin, message = "" }) {
+ 
+     setIsSubmitting(true);
+     try {
+-      const response = await apiFetch(isRegistering ? "/api/auth/register" : "/api/auth/login", {
+-        method: "POST",
+-        headers: { "Content-Type": "application/json" },
+-        body: JSON.stringify({
+-          ...(isRegistering ? { name: name.trim() } : {}),
++      if (isRegistering) {
++        const { data, error: signUpError } = await supabase.auth.signUp({
+           email: normalizedEmail,
+           password,
+-        }),
+-      });
+-
+-      let data;
+-      try {
+-        data = await response.json();
+-      } catch {
+-        throw new Error("The server returned an unreadable response.");
++          options: { data: { name: name.trim() } },
++        });
++        if (signUpError) throw new Error(signUpError.message);
++        if (!data.session) {
++          // Email confirmation is enabled in Supabase: the user must confirm before signing in.
++          setIsRegistering(false);
++          setPassword("");
++          setConfirmPassword("");
++          setNotice("Account created. Check your email and confirm your address, then sign in.");
++          return;
++        }
++      } else {
++        const { error: signInError } = await supabase.auth.signInWithPassword({
++          email: normalizedEmail,
++          password,
++        });
++        if (signInError) throw new Error(signInError.message);
+       }
+ 
++      // The backend verifies the Supabase session and returns the portal profile (role, student ID, ...).
++      const response = await apiFetch("/api/me");
+       if (!response.ok) {
+-        throw new Error(data.error || "Login failed. Check your email and password.");
+-      }
+-      if (!data.token || !data.user) {
+-        throw new Error("The server returned an invalid login response.");
++        await supabase.auth.signOut();
++        throw new Error(response.status === 401
++          ? "Sign in failed. Make sure your email address is confirmed."
++          : "The server could not load your profile. Please try again.");
+       }
+-
+-      saveAuthToken(data.token, rememberMe);
+-      onLogin(data.user);
++      onLogin(await response.json());
+     } catch (requestError) {
+       setError(
+         requestError instanceof TypeError
+@@ -80,13 +88,8 @@ export default function Login({ onLogin, message = "" }) {
+         <p className="login-subtitle">{isRegistering ? "Create your student account" : "Student Portal"}</p>
+ 
+         {message && <p className="login-message" role="status">{message}</p>}
++        {notice && <p className="login-message" role="status">{notice}</p>}
+         {error && <p className="login-error" role="alert">{error}</p>}
+-        {!isRegistering && (
+-          <p className="login-message">
+-            First time here? Enter any valid email and a password with at least 8 characters. Your student account will be created automatically.
+-          </p>
+-        )}
+-
+         <form onSubmit={handleSubmit}>
+           {isRegistering && (
+             <div className="login-field">
+@@ -150,14 +153,7 @@ export default function Login({ onLogin, message = "" }) {
+           )}
+ 
+           <div className="login-options">
+-            <label>
+-              <input
+-                type="checkbox"
+-                checked={rememberMe}
+-                onChange={(event) => setRememberMe(event.target.checked)}
+-              />
+-              Remember me
+-            </label>
++            <span />
+ 
+             {!isRegistering && (
+               <button
+diff --git a/frontend/src/api.js b/frontend/src/api.js
+index f25cd70..202eb38 100644
+--- a/frontend/src/api.js
++++ b/frontend/src/api.js
+@@ -1,34 +1,21 @@
++import { supabase } from "./supabase.js";
++
+ const configuredApiUrl = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+ 
+ export function apiUrl(path) {
+   return `${configuredApiUrl}${path.startsWith("/") ? path : `/${path}`}`;
+ }
+ 
+-export function getAuthToken() {
+-  try {
+-    return window.localStorage.getItem("token") || window.sessionStorage.getItem("token") || "";
+-  } catch {
+-    throw new Error("Browser storage is unavailable. Enable site storage and try again.");
+-  }
+-}
+-
+-export function saveAuthToken(token, rememberMe) {
+-  try {
+-    const destination = rememberMe ? window.localStorage : window.sessionStorage;
+-    const other = rememberMe ? window.sessionStorage : window.localStorage;
+-    destination.setItem("token", token);
+-    other.removeItem("token");
+-  } catch {
+-    throw new Error("Unable to save your session. Enable browser storage and try again.");
+-  }
++// Supabase keeps the session (and refreshes the access token) for us.
++export async function getAccessToken() {
++  const { data } = await supabase.auth.getSession();
++  return data.session?.access_token || "";
+ }
+ 
+-export function clearAuthToken() {
+-  try {
+-    window.localStorage.removeItem("token");
+-    window.sessionStorage.removeItem("token");
+-  } catch {
+-    throw new Error("Unable to clear your saved session. Check your browser storage settings.");
++export async function signOut() {
++  const { error } = await supabase.auth.signOut();
++  if (error) {
++    throw new Error("Unable to sign you out. Please try again.");
+   }
+ }
+ 
+@@ -62,7 +49,7 @@ export async function syncGoogleClassroomAssignments() {
+ 
+ export async function apiFetch(path, options = {}) {
+   const headers = new Headers(options.headers);
+-  const token = getAuthToken();
++  const token = await getAccessToken();
+ 
+   if (token && !headers.has("Authorization")) {
+     headers.set("Authorization", `Bearer ${token}`);
+diff --git a/frontend/src/main.jsx b/frontend/src/main.jsx
+index 56458c3..ac4e40c 100644
+--- a/frontend/src/main.jsx
++++ b/frontend/src/main.jsx
+@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
+ import { createRoot } from "react-dom/client";
+ import { calculateResultSummary, getGradeFromScore, getGradePointForGrade, isEarnedCredit, SPECIAL_GRADES } from "../../shared/grading.js";
+ import Login from "./Login.jsx";
+-import { apiFetch, apiUrl, clearAuthToken, disconnectGoogleClassroom, getAuthToken, getGoogleClassroomStatus, redirectToGoogleClassroomConnect } from "./api.js";
++import { apiFetch, apiUrl, disconnectGoogleClassroom, getAccessToken, getGoogleClassroomStatus, redirectToGoogleClassroomConnect, signOut } from "./api.js";
+ import "./style.css";
+ 
+ const GRADE_OPTIONS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "D", "F", "I", "W", "S", "AB"];
+@@ -494,12 +494,12 @@ function App() {
+ 
+     async function restoreSession() {
+       try {
+-        if (!getAuthToken()) return;
++        if (!(await getAccessToken())) return;
+ 
+         const response = await apiFetch("/api/me");
+         if (!response.ok) {
+           if (response.status === 401) {
+-            clearAuthToken();
++            await signOut().catch(() => {});
+             if (!cancelled) setAuthMessage("Your session expired. Please sign in again.");
+             return;
+           }
+@@ -521,9 +521,9 @@ function App() {
+     };
+   }, []);
+ 
+-  function handleLogout() {
++  async function handleLogout() {
+     try {
+-      clearAuthToken();
++      await signOut();
+     } catch (error) {
+       setAuthMessage(error.message);
+     }
+@@ -1295,15 +1295,12 @@ function Payments() {
+       }
+     
+       try {
+-        const token = getAuthToken();
+-    
+         const response = await apiFetch(
+           "/api/payments/initiate",
+           {
+             method: "POST",
+             headers: {
+               "Content-Type": "application/json",
+-              Authorization: `Bearer ${token}`,
+             },
+             body: JSON.stringify({
+               invoiceId: invoiceId.trim(),
+@@ -1897,8 +1894,9 @@ function OfficialUniversityResult({ onOfficialResult }) {
+     return () => { active = false; };
+   }, []);
+ 
+-  const sendPdf = (endpoint, file) => new Promise((resolve, reject) => {
+-    const token = getAuthToken();
++  const sendPdf = async (endpoint, file) => {
++    const token = await getAccessToken();
++    return new Promise((resolve, reject) => {
+     if (!token) {
+       reject(new Error("Sign in with an administrator account to upload result documents."));
+       return;
+@@ -1932,7 +1930,8 @@ function OfficialUniversityResult({ onOfficialResult }) {
+       resolve(data);
+     };
+     request.send(formData);
+-  });
++    });
++  };
+ 
+   const handlePreview = async () => {
+     if (!selectedFile) {
+diff --git a/frontend/src/supabase.js b/frontend/src/supabase.js
+new file mode 100644
+index 0000000..2f85db8
+--- /dev/null
++++ b/frontend/src/supabase.js
+@@ -0,0 +1,11 @@
++import { createClient } from "@supabase/supabase-js";
++
++const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
++const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
++
++if (!supabaseUrl || !supabaseAnonKey) {
++  throw new Error("Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (see frontend/.env.example).");
++}
++
++// The anon key is safe to ship to the browser; access is enforced by the backend and Supabase Auth.
++export const supabase = createClient(supabaseUrl, supabaseAnonKey);

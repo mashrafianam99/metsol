@@ -611,7 +611,12 @@ export function createTransportRouter({ db, auth, roles, supabaseUrl, serviceRol
 
   router.get('/admin/transport/stops', auth, roles('ADMIN', 'TRANSPORT_ADMIN'), async (_req, res) => {
     return res.json(await db.busStop.findMany({
-      include: { routes: { include: { route: { select: { id: true, name: true } } }, orderBy: { sequence: 'asc' } },
+      include: {
+        routes: {
+          include: { route: { select: { id: true, name: true } } },
+          orderBy: { sequence: 'asc' },
+        },
+      },
       orderBy: [{ area: 'asc' }, { name: 'asc' }],
     }));
   });

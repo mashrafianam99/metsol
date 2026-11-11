@@ -1,14 +1,17 @@
 import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { google } from 'googleapis';
+import { fetchStudentCoursework } from './classroomCoursework.js';
 
 const db = new PrismaClient();
 
+// Read-only student scopes: the portal lists coursework, and students submit inside Google Classroom itself.
 export const GOOGLE_CLASSROOM_SCOPES = [
+  'openid',
+  'email',
   'https://www.googleapis.com/auth/classroom.courses.readonly',
-  'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
-  'https://www.googleapis.com/auth/classroom.student-submissions.students.readonly',
-  'https://www.googleapis.com/auth/classroom.student-submissions.students',
+  'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
+  'https://www.googleapis.com/auth/classroom.topics.readonly',
 ];
 
 function getEncryptionKey() {
@@ -62,26 +65,25 @@ export function getGoogleOAuthClient() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export function getGoogleClassroomAuthUrl(userId, state) {
+// loginHint is the portal email, so Google preselects the matching account when the student has several.
+export function getGoogleClassroomAuthUrl(loginHint, state) {
   const oauth2Client = getGoogleOAuthClient();
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
+    prompt: 'consent select_account',
     include_granted_scopes: true,
     state,
     scope: GOOGLE_CLASSROOM_SCOPES,
-    login_hint: userId,
+    ...(loginHint ? { login_hint: loginHint } : {}),
   });
 }
 
-function mapGoogleCourseToPortalCourse(course) {
-  return {
-    code: String(course.id || course.name || 'CLASSROOM').slice(0, 25),
-    title: course.name || 'Google Classroom course',
-    department: 'Google Classroom',
-    credits: 0,
-    googleClassroomCourseId: course.id,
-  };
+// Raised when the stored Google grant no longer works and the student must connect again.
+export class GoogleReconnectRequiredError extends Error {
+  constructor(message = 'Your Google Classroom access has expired or was revoked. Connect Google Classroom again.') {
+    super(message);
+    this.name = 'GoogleReconnectRequiredError';
+  }
 }
 
 export async function getAuthorizedGoogleClassroomClient(userId) {
@@ -102,123 +104,48 @@ export async function getAuthorizedGoogleClassroomClient(userId) {
     scope: connection.scope || GOOGLE_CLASSROOM_SCOPES.join(' '),
   });
 
+  // Persist access tokens that the client refreshes, so each request does not refresh again.
+  oauth2Client.on('tokens', (tokens) => {
+    if (!tokens.access_token) return;
+    db.googleAccountConnection.update({
+      where: { userId },
+      data: {
+        accessTokenEncrypted: encryptSecret(tokens.access_token),
+        ...(tokens.refresh_token ? { refreshTokenEncrypted: encryptSecret(tokens.refresh_token) } : {}),
+        expiryDate: tokens.expiry_date ? new Date(Number(tokens.expiry_date)) : null,
+      },
+    }).catch((error) => console.error('Unable to save refreshed Google token:', error?.message || error));
+  });
+
   return { oauth2Client, connection };
 }
 
-export async function syncGoogleClassroomAssignmentsForUser(userId) {
-  const authorized = await getAuthorizedGoogleClassroomClient(userId);
-  if (!authorized) {
-    return [];
-  }
-
-  const { oauth2Client } = authorized;
-  const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
-
-  const coursesResponse = await classroom.courses.list({ studentId: 'me', pageSize: 100 });
-  const courses = coursesResponse.data.courses || [];
-  const syncedAssignments = [];
-
-  for (const course of courses) {
-    const existingCourse = await db.course.findFirst({
-      where: { googleClassroomCourseId: course.id },
-    });
-
-    const courseRecord = existingCourse || await db.course.create({
-      data: mapGoogleCourseToPortalCourse(course),
-    });
-
-    const courseworkResponse = await classroom.courses.courseWork.list({
-      courseId: course.id,
-      pageSize: 100,
-      orderBy: 'dueDate desc',
-    });
-
-    const coursework = courseworkResponse.data.courseWork || [];
-
-    for (const item of coursework) {
-      const dueAt = item.dueDate ? new Date(item.dueDate.year, item.dueDate.month - 1, item.dueDate.day) : null;
-      const existingAssignment = await db.assignment.findFirst({
-        where: { googleClassroomAssignmentId: item.id },
-      });
-
-      const assignmentData = {
-        title: item.title || 'Untitled Google Classroom assignment',
-        description: item.description || item.instructions || '',
-        dueAt,
-        courseId: courseRecord.id,
-        teacherId: userId,
-        userId,
-        googleClassroomAssignmentId: item.id,
-        googleClassroomCourseId: course.id,
-        googleClassroomUrl: item.alternateLink || '',
-        source: 'GOOGLE_CLASSROOM',
-        materials: item.materials || [],
-        submissionStatus: item.state || 'PUBLISHED',
-      };
-
-      if (existingAssignment) {
-        const updatedAssignment = await db.assignment.update({
-          where: { id: existingAssignment.id },
-          data: assignmentData,
-          include: { course: true },
-        });
-        syncedAssignments.push(updatedAssignment);
-      } else {
-        const createdAssignment = await db.assignment.create({
-          data: assignmentData,
-          include: { course: true },
-        });
-        syncedAssignments.push(createdAssignment);
-      }
-    }
-  }
-
-  return syncedAssignments;
+// Revoked/expired grants and missing scopes are fixed by connecting again; other errors (e.g. API disabled) are not.
+function isReconnectError(error) {
+  const status = error?.response?.status ?? error?.code;
+  const reason = error?.response?.data?.error;
+  const message = String(error?.message || '');
+  return reason === 'invalid_grant'
+    || status === 401
+    || (status === 403 && /scope|insufficient/iu.test(message));
 }
 
-export async function submitGoogleClassroomAssignment(userId, assignmentId, submissionPayload) {
-  const connection = await db.googleAccountConnection.findUnique({ where: { userId } });
-  if (!connection) {
-    throw new Error('Google Classroom is not connected for this account. Connect a Google account first.');
+// Live, read-only list of the signed-in student's own Classroom coursework. Returns null when not connected.
+export async function getStudentCourseworkForUser(userId) {
+  const authorized = await getAuthorizedGoogleClassroomClient(userId);
+  if (!authorized) {
+    return null;
   }
 
-  const assignment = await db.assignment.findUnique({
-    where: { id: assignmentId },
-  });
-
-  if (!assignment) {
-    throw new Error('Assignment not found.');
+  const classroom = google.classroom({ version: 'v1', auth: authorized.oauth2Client });
+  try {
+    return await fetchStudentCoursework(classroom);
+  } catch (error) {
+    if (isReconnectError(error)) {
+      throw new GoogleReconnectRequiredError();
+    }
+    throw error;
   }
-
-  if (!assignment.googleClassroomAssignmentId) {
-    throw new Error('This assignment is not linked to Google Classroom.');
-  }
-
-  const oauth2Client = getGoogleOAuthClient();
-  oauth2Client.setCredentials({
-    access_token: decryptSecret(connection.accessTokenEncrypted),
-    refresh_token: connection.refreshTokenEncrypted ? decryptSecret(connection.refreshTokenEncrypted) : undefined,
-    expiry_date: connection.expiryDate ? connection.expiryDate.getTime() : undefined,
-    token_type: connection.tokenType || 'Bearer',
-    scope: connection.scope || GOOGLE_CLASSROOM_SCOPES.join(' '),
-  });
-
-  const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
-  const body = {
-    assignmentSubmission: {
-      attachment: submissionPayload?.attachment || undefined,
-      text: submissionPayload?.content || undefined,
-    },
-  };
-
-  const response = await classroom.courses.courseWork.studentSubmissions.turnIn({
-    courseId: assignment.googleClassroomCourseId,
-    courseworkId: assignment.googleClassroomAssignmentId,
-    userId: 'me',
-    requestBody: body,
-  });
-
-  return response.data;
 }
 
 export async function disconnectGoogleAccountForUser(userId) {

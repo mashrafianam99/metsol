@@ -1,0 +1,159 @@
+SMART UNIVERSITY PORTAL - WORK LOG
+Date: 11 November 2026
+Project folder: C:\Users\NABIL\OneDrive\Desktop\smart-university-portal 2\smart-university-portal 2
+
+(No passwords, API keys or secrets are written in this file.)
+
+====================================================================
+PART 1 - FIXED ERRORS AND RAN THE APP
+====================================================================
+
+Checks run:
+- Backend tests: all passing (15 at the time, 22 now).
+- Frontend build (npm run build): builds successfully.
+- Ran both servers and clicked through all 13 pages in a browser:
+  no runtime errors.
+
+Main problem found (not a code issue):
+- The Supabase project was PAUSED, so its web address did not exist and
+  the database and login could not be reached.
+  -> It is now being restored from the Supabase dashboard (see Part 4).
+
+Bugs fixed:
+1. "Pay Now" on the Payments page never contacted the server. It only
+   showed a fake "Payment request created successfully" message.
+   -> It now sends the payment request (frontend/src/main.jsx).
+2. "Connect Google Classroom" always failed with 401 Unauthorized,
+   because the browser was sent to a protected address without the
+   login token.
+   -> The backend now returns the Google sign-in link as JSON, and the
+      frontend fetches it with the token, then redirects.
+      (backend/src/server.js, frontend/src/api.js)
+3. Pages showed confusing errors like "Unexpected token 'U'" when the
+   server replied with plain text (e.g. "Unauthorized").
+   -> Added a safe readJson() helper (frontend/src/api.js), used on the
+      Payments and AI Assistant pages.
+4. The login page showed only "Failed to fetch" when the server was
+   unreachable.
+   -> Now shows a clear message (frontend/src/Login.jsx).
+5. After the Google sign-in, the app opened on the Dashboard, so the
+   result message was never seen. "Access denied" was not handled.
+   -> Now opens the Google Classroom page and shows the message.
+6. Missing browser tab icon (favicon 404).
+   -> Added to frontend/index.html.
+
+Still to note:
+- npm reported 8 known security issues in backend packages (6 high).
+  Packages were not changed. Run "npm audit" in backend to review.
+
+====================================================================
+PART 2 - GOOGLE CLASSROOM FEATURE (BUILT)
+====================================================================
+
+What students get:
+- Connect their Google Classroom account once (Google Classroom page ->
+  "Connect Google Classroom").
+- Dashboard card "Next in Google Classroom": the next 3 things to
+  submit, with due time ("Due tomorrow", "2 days overdue").
+- Google Classroom page:
+  * Counts: Missing / Due in 7 days / Lab work to do / Turned in
+  * Filters: To do / Lab work / Turned in / All
+  * Each item shows course, topic, due date, status, points and grade
+- "Submit in Classroom" button opens that student's own page for the
+  item in Google Classroom, where they attach files and press Turn in.
+
+Lab work: Google Classroom has no "lab" type. An item counts as lab work
+if its Classroom topic or title contains "lab" or "laboratory".
+
+How it works:
+- Read-only access only. The portal never submits work itself.
+- Coursework is fetched live from Google and NOT stored. Only the
+  Google login tokens are stored, encrypted.
+
+Problems in the old Google Classroom code that were replaced:
+- Privacy leak: it copied each student's Classroom work into the shared
+  assignments table, which every user could see.
+- Connecting would always fail: it never asked permission to read the
+  student's email, but then tried to read it.
+- It asked for teacher-level and write permissions. Now only read-only
+  student permissions.
+- It could not tell "to submit" from "turned in", ignored due times,
+  and never saved renewed Google tokens.
+- If access expires or is revoked, the page now shows a Reconnect button.
+
+Files added:
+- backend/src/classroomCoursework.js       (main logic)
+- backend/test/classroom-coursework.test.js (7 new tests)
+- frontend/src/GoogleClassroom.jsx         (page + dashboard card)
+
+Files changed:
+- backend/src/googleClassroom.js   (scopes, token saving, new fetch)
+- backend/src/server.js            (new route
+                                    GET /api/google/classroom/coursework;
+                                    old /sync route removed)
+- frontend/src/api.js              (getGoogleClassroomCoursework)
+- frontend/src/main.jsx            (uses the new component and card)
+- frontend/src/style.css           (Classroom styles, incl. dark mode)
+- README.md                        (Google Classroom setup steps)
+
+====================================================================
+PART 3 - LOCAL CONFIGURATION DONE
+====================================================================
+
+- backend/.env backed up to backend/.env.backup
+- Added to backend/.env:
+    GOOGLE_CLIENT_ID=""            <- still EMPTY (comes from Google)
+    GOOGLE_CLIENT_SECRET=""        <- still EMPTY (comes from Google)
+    GOOGLE_REDIRECT_URI="http://localhost:4000/api/google/classroom/callback"
+    GOOGLE_OAUTH_ENCRYPTION_KEY    <- random secret generated and filled in
+- .env is ignored by git, so these are not committed.
+
+====================================================================
+PART 4 - ACCOUNT SETUP (IN PROGRESS)
+====================================================================
+
+Note: The automated test browser was blocked by Google ("This browser
+or app may not be secure"), so we switched to your own Chrome via the
+Claude in Chrome extension.
+
+Supabase:
+- Signed in. Organization "Adopdotion".
+- Project "Metsol" (region ap-southeast-1) shows "Project is coming up"
+  (restoring). Its web address resolves again.
+- STILL TO DO once it is fully up:
+    cd backend
+    npx prisma migrate deploy
+    npm run seed
+
+Google Cloud:
+- Signed in. Google is asking to accept the Google Cloud Terms of
+  Service (country: Bangladesh). WAITING FOR YOUR APPROVAL.
+- STILL TO DO after approval:
+  1. Accept Google Cloud Terms of Service
+  2. Create project "Smart University Portal" (free, no billing)
+  3. Enable the Google Classroom API
+  4. OAuth consent screen: External, Testing, app name
+     "Smart University Portal", your Gmail as support contact
+  5. Add scopes: openid, email, classroom.courses.readonly,
+     classroom.coursework.me.readonly, classroom.topics.readonly
+  6. Add your Gmail (and later students' accounts) as test users
+  7. Create OAuth client (Web application) with redirect URI:
+     http://localhost:4000/api/google/classroom/callback
+  8. Copy client ID and secret into backend/.env, restart backend,
+     test connecting a real Classroom account
+
+====================================================================
+HOW TO RUN THE APP
+====================================================================
+
+Terminal 1:
+    cd backend
+    npm install
+    npm run dev          (API on http://localhost:4000)
+
+Terminal 2:
+    cd frontend
+    npm install
+    npm run dev          (open http://localhost:5173)
+
+Run tests:   cd backend  then  npm test

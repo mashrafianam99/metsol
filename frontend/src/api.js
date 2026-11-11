@@ -19,8 +19,24 @@ export async function signOut() {
   }
 }
 
-export function redirectToGoogleClassroomConnect() {
-  window.location.href = apiUrl("/api/google/classroom/connect");
+// Parses a JSON body without throwing on plain-text responses (e.g. "Unauthorized" or rate-limit messages).
+export async function readJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+// The connect endpoint requires the bearer token, which a plain browser navigation cannot send,
+// so we fetch the Google consent URL first and then navigate to it.
+export async function redirectToGoogleClassroomConnect() {
+  const response = await apiFetch("/api/google/classroom/connect");
+  const data = await readJson(response);
+  if (!response.ok || !data.url) {
+    throw new Error(data.error || "Unable to start the Google Classroom connection.");
+  }
+  window.location.href = data.url;
 }
 
 export async function getGoogleClassroomStatus() {
@@ -39,12 +55,16 @@ export async function disconnectGoogleClassroom() {
   return response.json();
 }
 
-export async function syncGoogleClassroomAssignments() {
-  const response = await apiFetch("/api/google/classroom/sync", { method: "POST" });
+// Returns the student's live Classroom coursework. Errors carry a code: NOT_CONNECTED or RECONNECT_REQUIRED.
+export async function getGoogleClassroomCoursework() {
+  const response = await apiFetch("/api/google/classroom/coursework");
+  const data = await readJson(response);
   if (!response.ok) {
-    throw new Error("Unable to sync Google Classroom assignments.");
+    const error = new Error(data.error || "Unable to load your Google Classroom coursework.");
+    error.code = data.code;
+    throw error;
   }
-  return response.json();
+  return data;
 }
 
 export async function apiFetch(path, options = {}) {

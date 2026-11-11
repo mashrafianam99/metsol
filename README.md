@@ -55,8 +55,21 @@ Student results are fetched using the Student ID attached to the authenticated b
 ### Sample result PDF for testing
 A ready-to-import sample result file is included at `backend/test-data/sample-result.pdf`. Use it to quickly verify the result upload flow in the admin Results screen before testing with a real university PDF.
 
-## Google Classroom integration status
-This branch includes a working backend-and-UI scaffold for Google Classroom connectivity, but the live Google OAuth flow still requires a real Google Cloud OAuth client configuration before it can complete the connection in a browser. The app is structured to keep the existing student portal and JWT auth flow intact while exposing Classroom connect, callback, status, and disconnect routes. The code is intentionally left as a safe integration scaffold until real credentials are added.
+## Google Classroom integration
+Students connect the Google account they use for Google Classroom once (Google Classroom page → **Connect Google Classroom**). The portal then shows, live from Google:
+- assignments and lab work still to submit, sorted by due date, with Missing / To submit / No due date / Turned in status;
+- a **Lab work** filter (coursework whose Classroom topic or title contains "lab"/"laboratory");
+- a "Next in Google Classroom" card on the dashboard.
+
+Each item has a **Submit in Classroom** button that opens that student's own submission page in Google Classroom, where they attach files and press *Turn in*. The portal requests read-only scopes, never submits work itself, and does not store coursework. Only encrypted OAuth tokens are kept, in `GoogleAccountConnection`.
+
+### Setup (Google Cloud Console)
+1. Create or choose a project, then **APIs & Services → Library**: enable **Google Classroom API**.
+2. **OAuth consent screen**: User type *External* (or *Internal* for a Workspace domain). Add the scopes `openid`, `email`, `classroom.courses.readonly`, `classroom.coursework.me.readonly` and `classroom.topics.readonly`. While the app is in *Testing*, add each student's Google account under **Test users**.
+3. **Credentials → Create OAuth client ID → Web application**. Add the authorised redirect URI `http://localhost:4000/api/google/classroom/callback`, or your deployed backend URL plus `/api/google/classroom/callback`.
+4. In `backend/.env` set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (the same URI as step 3), and `GOOGLE_OAUTH_ENCRYPTION_KEY` (a random 32+ character secret). Restart the backend.
+
+University Google Workspace accounts may need the Workspace administrator to allow the app (Admin console → Security → API controls).
 
 ## External integrations
 - AI: Set `GROQ_API_KEY` in backend/.env and optionally `GROQ_MODEL` (defaults to `openai/gpt-oss-20b`). EduAI uses Groq's OpenAI-compatible Responses API. Without a key, the assistant returns a clearly labelled demo response. Students can upload PDF, DOCX, and TXT files up to 10 MB for summaries and document-grounded Q&A. Documents are extracted in backend memory, limited to 30,000 characters and 100 PDF pages, and are not stored by the portal. Extracted text is sent to Groq when answering questions; scanned PDFs require OCR and are not supported.
