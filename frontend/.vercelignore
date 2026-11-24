@@ -1,0 +1,17 @@
+# Never upload local secrets; env vars live in the Vercel project settings.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+node_modules
+**/node_modules
+.vercel
+.playwright-mcp
+frontend/src-backup-before-redesign
+frontend/dist
+qc
+*.patch
+src-backup-before-redesign
+dist

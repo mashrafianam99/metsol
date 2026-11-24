@@ -26,3 +26,8 @@ pnpm-debug.log*
 # Prisma
 # Keep prisma/schema.prisma and prisma/migrations/
 # Do NOT ignore migrations
+
+# Vercel
+.vercel
+.env*
+!.env.example

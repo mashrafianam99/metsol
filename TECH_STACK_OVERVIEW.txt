@@ -1,0 +1,169 @@
+SMART UNIVERSITY PORTAL - TECH STACK OVERVIEW
+Written: 12 November 2026
+Project folder: C:\Users\NABIL\OneDrive\Desktop\smart-university-portal 2\smart-university-portal 2
+
+(No passwords, API keys or secrets are written in this file.)
+
+====================================================================
+1. WHAT THE PROJECT IS
+====================================================================
+
+A web portal for Metropolitan University, Sylhet, with three roles:
+Student, Teacher and Admin. It is a classic three-part web app:
+
+    Browser (React)  --->  API server (Express)  --->  Database (PostgreSQL)
+                 \                                  /
+                  +------  Supabase (login + hosted database)  ------+
+
+====================================================================
+2. THE STACK AT A GLANCE
+====================================================================
+
+Layer            Technology                         Version (package.json)
+---------------  ---------------------------------  ----------------------
+Frontend UI      React                              19
+Frontend build   Vite (dev server + bundler)        7
+Styling          Plain CSS (no Tailwind/Bootstrap)  -
+Maps             Leaflet + OpenStreetMap            1.9
+Backend runtime  Node.js (ES modules)               20+ required, 24 installed
+Backend API      Express                            5
+Database         PostgreSQL, hosted on Supabase     -
+Database access  Prisma ORM                         6
+Login            Supabase Auth                      supabase-js 2
+Validation       Zod                                4
+AI assistant     Groq API                           -
+Tests            Node's built-in test runner        -
+Hosting (plan)   Vercel, two projects               -
+
+Language: JavaScript everywhere (JSX on the frontend). No TypeScript.
+
+====================================================================
+3. FRONTEND  (folder: frontend/)
+====================================================================
+
+- React 19 single-page app, built and served by Vite 7.
+- No routing library: pages are switched inside main.jsx.
+- No UI component library: styling is hand-written CSS in style.css,
+  theme.css (light/dark mode) and transport.css.
+- Leaflet draws the bus route maps on the Bus Tracking page.
+- @supabase/supabase-js handles sign in, sign up and password reset
+  directly from the browser.
+- In development, Vite forwards every /api request to the backend on
+  port 4000.
+
+Main files in frontend/src:
+    main.jsx            the app shell and most pages
+    Login.jsx           sign in / create account / forgot password
+    ResetPassword.jsx   set a new password from the email link
+    AuthLayout.jsx      shared layout for the login screens
+    GoogleClassroom.jsx Google Classroom page and dashboard card
+    Transport.jsx       bus routes, stops and schedules
+    CommandPalette.jsx  Ctrl+K page search
+    api.js              all calls to the backend
+    supabase.js         Supabase client setup
+    icons.jsx           icon set
+
+====================================================================
+4. BACKEND  (folder: backend/)
+====================================================================
+
+- Node.js + Express 5 REST API on http://localhost:4000.
+- Prisma 6 talks to PostgreSQL. The schema has 24 tables, including
+  User, Course, Assignment, Attendance, Result, Notice, Payment,
+  FeeInvoice, TransportRoute, Bus and GoogleAccountConnection.
+
+Supporting libraries:
+    helmet               security headers
+    cors                 only the frontend's address may call the API
+    express-rate-limit   300 requests per 15 minutes
+    zod                  checks incoming data
+    multer               file uploads, kept in memory
+    pdfjs-dist           reads text from PDFs (results, AI documents)
+    mammoth              reads text from Word (.docx) files
+    googleapis           Google Classroom
+    jsonwebtoken         signed tokens
+    bcryptjs             password hashing (used by the seed script)
+
+Main files in backend/src:
+    server.js               all main routes and the login check
+    transportRoutes.js      transport admin and student routes
+    transport.js            transport helpers
+    googleClassroom.js      Google sign-in and token storage
+    classroomCoursework.js  reads coursework from Google Classroom
+    ai.js, aiDocuments.js   EduAI answers and document reading
+    result-import/          result PDF parser and student matching
+
+Shared code: shared/grading.js (grade and CGPA rules) is used by the
+backend.
+
+====================================================================
+5. LOGIN AND ROLES
+====================================================================
+
+- Supabase Auth stores passwords and issues the login session.
+- The browser sends the Supabase token with every API call, and the
+  backend checks it with Supabase.
+- Roles (STUDENT / TEACHER / ADMIN) live in our own User table, not in
+  Supabase. New sign-ups are always STUDENT.
+- Only confirmed email addresses are accepted.
+
+Note: README.md still lists "JWT + bcrypt" as the authentication. That
+is the older design; login now goes through Supabase Auth.
+
+====================================================================
+6. OUTSIDE SERVICES
+====================================================================
+
+Service             Used for                          Status
+------------------  --------------------------------  ---------------------
+Supabase            Database and login                Working
+Groq                EduAI assistant, summaries, Q&A   Demo answer if no key
+Google Classroom    Shows coursework to submit        Needs Google client
+                                                      ID and secret
+OpenStreetMap,      Map tiles, address search and     Routing needs
+Nominatim, OSRM     road routing for bus routes       OSRM_ROUTING_URL
+bKash / Nagad       Fee payments                      Adapter only; creates
+                                                      PENDING payments
+Vercel              Hosting frontend and backend      Setup guide written
+                                                      (SUPABASE_VERCEL_SETUP.md)
+
+====================================================================
+7. FEATURES BUILT
+====================================================================
+
+Overview:     Dashboard
+Academics:    Courses, Teachers, Assignments (with cover-page print),
+              Google Classroom, Attendance, Results and CGPA
+Learning:     Resources, Quiz, AI Assistant (EduAI)
+Campus life:  Notices, Bus Tracking, Payments
+Admin:        Result PDF import, transport management, user management
+Other:        Light/dark mode, Ctrl+K page search, password reset
+
+====================================================================
+8. TESTS AND TOOLS
+====================================================================
+
+- Backend tests use Node's built-in runner (cd backend, then npm test).
+  Test files cover result import, AI, AI documents, transport and
+  Google Classroom coursework.
+- The frontend has no automated tests.
+- Git is used for version control.
+- Development help: Claude Code, with a Playwright browser for
+  click-through checks and the Supabase connector for the database.
+
+====================================================================
+9. HOW TO RUN
+====================================================================
+
+Terminal 1:
+    cd backend
+    npm install
+    npm run dev          (API on http://localhost:4000)
+
+Terminal 2:
+    cd frontend
+    npm install
+    npm run dev          (open http://localhost:5173)
+
+Test student login: student@university.test (password is in README.md
+under "Demo login").
