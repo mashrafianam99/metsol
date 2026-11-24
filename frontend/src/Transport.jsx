@@ -4,6 +4,9 @@ import "leaflet/dist/leaflet.css";
 import { apiFetch } from "./api.js";
 import "./transport.css";
 
+// MapLibre is large; load it only when the student map is shown.
+const LiveBusMap = React.lazy(() => import("./LiveBusMap.jsx"));
+
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const ADMIN = (role) => role === "ADMIN" || role === "TRANSPORT_ADMIN";
 const emptyBus = {
@@ -448,14 +451,16 @@ export default function Transport({ user }) {
           {(!isAdmin || adminPanel === "Overview") && (
             <section className="transport-discovery">
               <div className="transport-discovery-heading">
-                <div><h2>{isAdmin ? "Student route preview" : "Find your route"}</h2><p>Only university-entered route and stop information is shown. No live GPS data is available.</p></div>
+                <div><h2>{isAdmin ? "Student view: buses to campus" : "Buses to campus"}</h2><p>Pick where you are to see which bus reaches you first and which gets you to class on time. Positions follow the official timetable.</p></div>
                 {!isAdmin && <label className="transport-search">Search routes or stops<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Route, stop or area" /></label>}
               </div>
-              <div className="transport-map-wrap"><MapView routes={visibleRoutes} stops={data.stops} selectedRouteId={selectedRouteId} onSelectRoute={setSelectedRouteId} /></div>
+              <React.Suspense fallback={<div className="transport-empty">Loading 3D map…</div>}>
+                <LiveBusMap routes={visibleRoutes} buses={data.buses.filter((bus) => bus.isActive)} stops={data.stops} />
+              </React.Suspense>
               {!isAdmin && <div className="transport-route-grid">
                 {visibleRoutes.map((route) => <article className={route.id === selectedRouteId ? "selected" : ""} key={route.id} onClick={() => setSelectedRouteId(route.id)} tabIndex={0} onKeyDown={(event) => event.key === "Enter" && setSelectedRouteId(route.id)}>
                   <h3>{route.name}</h3><span>{route.startingPoint} → {route.destination}</span>
-                  <ol>{(route.stops || []).map(({ busStop, arrivalTime, departureTime }, index) => <li key={busStop.id}><strong>{index + 1}. {busStop.name}</strong><span>{busStop.area}{arrivalTime ? ` · Arrive ${arrivalTime}` : ""}{departureTime ? ` · Leave ${departureTime}` : ""}</span></li>)}</ol>
+                  <ol>{(route.stops || []).map(({ busStop, arrivalTime, departureTime }) => <li key={busStop.id}><strong>{busStop.name}</strong><span>{busStop.area}{arrivalTime ? ` · Arrive ${arrivalTime}` : ""}{departureTime ? ` · Leave ${departureTime}` : ""}</span></li>)}</ol>
                   {!route.geometry?.length && <small className="transport-hint">Stop coordinates are shown; road geometry has not been added yet.</small>}
                   {(route.buses || []).map((bus) => <div className="transport-bus-line" key={bus.id}>{bus.number} · {bus.name}</div>)}
                 </article>)}

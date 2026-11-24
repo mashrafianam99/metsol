@@ -192,3 +192,61 @@
   .transport-tabs button { flex: 0 0 auto; padding: 10px 12px; }
   .transport-inline-search { align-items: stretch; flex-direction: column; }
 }
+
+/* ---------- 3D bus map (LiveBusMap.jsx) ---------- */
+.live-bus { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; margin: 14px 0 20px; }
+.live-bus-map { position: relative; height: 560px; border-radius: var(--r-lg, 20px); overflow: hidden; border: 1px solid var(--border); background: var(--surface-3); box-shadow: var(--shadow-sm); }
+.live-bus-canvas { width: 100%; height: 100%; } /* maplibre sets position: relative on this element */
+.live-bus-fallback { display: grid; place-items: center; height: 100%; padding: 24px; text-align: center; color: var(--text-2); }
+.live-bus-badge { position: absolute; left: 12px; bottom: 12px; z-index: 2; padding: 6px 11px; border-radius: 99px; font-size: 12px; font-weight: 700; color: var(--text-2); background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--border); backdrop-filter: blur(8px); }
+.live-bus-badge::first-letter { color: var(--warning); }
+
+.live-bus-panel { display: flex; flex-direction: column; gap: 12px; min-height: 0; max-height: 560px; }
+.live-bus-where { padding: 16px; border-radius: var(--r-md, 14px); background: var(--surface); border: 1px solid var(--border); }
+.live-bus-where h3 { font-size: 16px; font-weight: 800; color: var(--text); margin-bottom: 10px; }
+.live-bus-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.live-bus-class { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: var(--text-2); }
+.live-bus-class input { height: 38px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 14px; }
+.live-bus-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.live-bus-chips button { padding: 6px 11px; border-radius: 99px; font-size: 12.5px; font-weight: 600; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast); }
+.live-bus-chips button:hover { border-color: var(--brand-soft-2); color: var(--brand-strong); }
+.live-bus-chips button.active { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.live-bus-hint { margin-top: 10px; font-size: 12.5px; color: var(--text-3); }
+.live-bus-error { margin-top: 8px; font-size: 13px; color: var(--danger); }
+
+.live-bus-list { list-style: none; display: grid; gap: 8px; overflow-y: auto; padding-right: 2px; }
+.live-bus-list button { width: 100%; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; border-radius: var(--r-md, 14px); background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--route, var(--brand)); color: var(--text); transition: transform var(--t-fast), box-shadow var(--t-fast); }
+.live-bus-list button:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.live-bus-num { display: grid; place-items: center; min-width: 52px; height: 32px; padding: 0 8px; border-radius: 9px; font-size: 12.5px; font-weight: 800; color: #fff; background: var(--route, var(--brand)); font-variant-numeric: tabular-nums; }
+.live-bus-info { display: grid; gap: 2px; min-width: 0; }
+.live-bus-info strong { font-size: 14px; font-weight: 700; color: var(--text); }
+.live-bus-info em { font-style: normal; font-weight: 600; color: var(--brand); }
+.live-bus-info small { font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
+.live-bus-tag { padding: 4px 9px; border-radius: 8px; font-size: 11.5px; font-weight: 800; white-space: nowrap; }
+.live-bus-tag.ok { color: var(--success); background: var(--success-soft); }
+.live-bus-tag.late { color: var(--danger); background: var(--danger-soft); }
+.live-bus-empty { padding: 16px; border-radius: var(--r-md, 14px); border: 1px dashed var(--border-strong); color: var(--text-2); font-size: 13.5px; }
+
+/* map markers */
+.bus-marker { position: relative; width: 38px; height: 38px; cursor: pointer; filter: drop-shadow(0 6px 8px rgba(16, 21, 58, .35)); }
+.bus-marker-body { position: absolute; inset: 4px; display: grid; place-items: center; border-radius: 10px; background: var(--route); color: #fff; font: 800 12px/1 var(--font-sans, sans-serif); border: 2px solid #fff; }
+.bus-marker-arrow { position: absolute; inset: 0; transform: rotate(var(--heading, 0deg)); }
+.bus-marker-arrow::before { content: ""; position: absolute; top: -7px; left: 50%; margin-left: -6px; border: 6px solid transparent; border-bottom: 9px solid var(--route); }
+.bus-marker.idle { opacity: .7; }
+.bus-marker.idle .bus-marker-arrow { display: none; }
+.bus-marker.moving .bus-marker-body { animation: bus-pulse 2s ease-in-out infinite; }
+@keyframes bus-pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--route) 25%, transparent); } }
+
+.campus-marker, .rider-marker { display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.campus-marker span, .rider-marker span { padding: 6px 11px; border-radius: 10px; font: 800 12.5px/1 var(--font-sans, sans-serif); color: #fff; white-space: nowrap; box-shadow: 0 8px 18px rgba(16, 21, 58, .3); }
+.campus-marker span { background: linear-gradient(135deg, var(--mu-navy, #1b2068), var(--mu-red, #e5343d)); }
+.campus-marker::after { content: ""; width: 3px; height: 26px; background: var(--mu-navy, #1b2068); }
+.rider-marker span { background: #111827; border: 2px solid #fff; }
+
+@media (max-width: 1100px) {
+  .live-bus { grid-template-columns: 1fr; }
+  .live-bus-map { height: 440px; }
+  .live-bus-panel { max-height: none; }
+}
+.live-bus-loading { position: absolute; inset: 0; z-index: 3; display: grid; place-content: center; justify-items: center; gap: 12px; font-size: 14px; font-weight: 600; color: var(--text-2); background: var(--surface-2); }
+.live-bus-loading span { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--border); border-top-color: var(--brand); animation: spin .9s linear infinite; }
