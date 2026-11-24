@@ -17,9 +17,7 @@
     <script>
       // Apply the saved theme before first paint to avoid a light/dark flash.
       try {
-        var t = localStorage.getItem("mu-theme");
-        if (!t) t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        document.documentElement.dataset.theme = t;
+        document.documentElement.dataset.theme = localStorage.getItem("mu-theme-v2") === "dark" ? "dark" : "light";
       } catch (e) {}
     </script>
   </head>

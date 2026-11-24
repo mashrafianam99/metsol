@@ -471,7 +471,8 @@ const facultySources = [
   },
 ];
 
-const THEME_KEY = "mu-theme";
+// v2: the old "mu-theme" key holds dark values auto-saved from the OS setting; ignore them.
+const THEME_KEY = "mu-theme-v2";
 const SIDEBAR_KEY = "mu-sidebar-collapsed";
 
 // Preferences are a convenience only: storage can be unavailable (private mode, blocked site data).
@@ -513,11 +514,8 @@ function App() {
   const [active, setActive] = useState(() =>
     new URLSearchParams(window.location.search).has("googleClassroom") ? "Google Classroom" : "Dashboard"
   );
-  const [dark, setDark] = useState(() => {
-    const saved = readPreference(THEME_KEY);
-    if (saved) return saved === "dark";
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
-  });
+  // Light by default; dark only when the student picks it with the toggle.
+  const [dark, setDark] = useState(() => readPreference(THEME_KEY) === "dark");
   const [collapsed, setCollapsed] = useState(() => readPreference(SIDEBAR_KEY) === "1");
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -759,6 +757,18 @@ function App() {
       <CommandPalette open={paletteOpen} items={NAV_ITEMS} onSelect={navigate} onClose={() => setPaletteOpen(false)} />
     </div>
   );
+}
+
+// Renders the Markdown the AI commonly uses (**bold**, `code`, # headings) as React nodes — never as raw HTML.
+function formatAiText(text) {
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g)
+    .map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) return <strong key={i}>{part.slice(2, -2)}</strong>;
+      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) return <code key={i}>{part.slice(1, -1)}</code>;
+      return part;
+    });
 }
 
 function greetingFor(date) {
@@ -2595,7 +2605,7 @@ function Assistant() {
         <div className="messages" role="log" aria-live="polite" aria-relevant="additions">
           {messages.map((m, i) => (
             <div className={m.from === "ai" ? "message ai" : "message user"} key={i}>
-              {m.text}
+              {m.from === "ai" ? formatAiText(m.text) : m.text}
             </div>
           ))}
           {sending && <div className="message ai" role="status">Thinking...</div>}
