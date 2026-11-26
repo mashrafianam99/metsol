@@ -159,6 +159,7 @@ app.get('/api/google/classroom/callback', async (req, res) => {
     if (!tokens.access_token) {
       throw new Error('Google did not return an access token.');
     }
+    oauth2Client.setCredentials(tokens);
     const googleUserInfo = await oauth2Client.request({ url: 'https://www.googleapis.com/oauth2/v3/userinfo' });
     const profile = googleUserInfo.data || {};
     await db.googleAccountConnection.upsert({
