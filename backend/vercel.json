@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "monthly-fee-invoices": {
+      "schedule": "5 0 1 * *",
+      "timezone": "Asia/Dhaka",
+      "path": "/api/cron/monthly-invoices",
+      "requestMethod": "POST"
+    }
+  }
+}

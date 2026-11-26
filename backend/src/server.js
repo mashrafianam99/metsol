@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createMonthlyInvoices } from './monthlyInvoices.js';
 import { basename } from 'node:path';
 import { calculateResultSummary, SPECIAL_GRADES } from '../../shared/grading.js';
 import { extractPdfLines, isPdfBuffer, normalizeStudentId, ResultPdfError } from './result-import/pdfParser.js';
@@ -266,6 +267,23 @@ const sendStripeError = (res, error, message) => {
   console.error(message, error);
   return res.status(502).json({ error: message });
 };
+
+// Called by the Vercel schedule in backend/vercel.json on the 1st of each month (Dhaka time),
+// which sends "Authorization: Bearer $CRON_SECRET". Reruns are harmless: one invoice per student per month.
+app.post('/api/cron/monthly-invoices', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  const given = Buffer.from(req.headers.authorization || '');
+  const expected = Buffer.from(`Bearer ${secret}`);
+  if (!secret || given.length !== expected.length || !timingSafeEqual(given, expected)) return res.sendStatus(401);
+  try {
+    const result = await createMonthlyInvoices(db);
+    console.log('Monthly invoices:', result);
+    res.json(result);
+  } catch (error) {
+    console.error('Monthly invoice run failed:', error);
+    res.status(500).json({ error: 'Monthly invoice run failed.' });
+  }
+});
 
 app.get('/api/invoices', auth, async (req, res) => {
   const isAdmin = req.user.role === 'ADMIN';
