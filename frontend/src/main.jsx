@@ -501,8 +501,6 @@ const NAV_ITEMS = [
   { name: "Google Classroom", icon: "classroom", group: "Academics" },
   { name: "Attendance", icon: "calendarCheck", group: "Academics" },
   { name: "Results", icon: "chart", group: "Academics" },
-  { name: "Resources", icon: "folder", group: "Learning" },
-  { name: "Quiz", icon: "quiz", group: "Learning" },
   { name: "AI Assistant", icon: "sparkles", group: "Learning" },
   { name: "Notices", icon: "megaphone", group: "Campus Life" },
   { name: "Bus Tracking", icon: "bus", group: "Campus Life" },
@@ -747,8 +745,6 @@ function App() {
           {active === "Attendance" && <Attendance />}
           {active === "Results" && <Results key={user.role} user={user} />}
           {active === "Notices" && <Notices />}
-          {active === "Resources" && <Resources />}
-          {active === "Quiz" && <Quiz />}
           {active === "Bus Tracking" && <React.Suspense fallback={<div className="transport-empty">Loading transport…</div>}><Transport user={user} /></React.Suspense>}
           {active === "AI Assistant" && <Assistant />}
         </div>
@@ -2299,57 +2295,6 @@ function Notices() {
           {notice.transportScheduleId && <button className="outline-button" onClick={openSchedule}>View current transport schedule</button>}
         </div>
       ))}
-    </div>
-  );
-}
-
-function Resources() {
-  const resources = [
-    ["fileText", "AI Lecture Notes", "Artificial Intelligence"],
-    ["chart", "Database ER Diagram", "Database Management"],
-    ["book", "Software Engineering Book", "Software Engineering"],
-    ["video", "Data Visualization Lecture", "Data Visualization"],
-  ];
-
-  return (
-    <div className="resource-grid">
-      {resources.map((r) => (
-        <div className="card resource-card" key={r[1]}>
-          <div className="resource-icon"><Icon name={r[0]} size={20} /></div>
-          <h3>{r[1]}</h3>
-          <span>{r[2]}</span>
-          <button className="outline-button">Open Resource</button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Quiz() {
-  return (
-    <div className="quiz-container">
-      <div className="quiz-card">
-        <span className="eyebrow">PRACTICE QUIZ</span>
-        <h2>Artificial Intelligence</h2>
-        <p>Test your knowledge with AI-generated and instructor-created questions.</p>
-
-        <div className="quiz-stats">
-          <div>
-            <strong>10</strong>
-            <span>Questions</span>
-          </div>
-          <div>
-            <strong>15</strong>
-            <span>Minutes</span>
-          </div>
-          <div>
-            <strong>100</strong>
-            <span>Marks</span>
-          </div>
-        </div>
-
-        <button className="primary-button">Start Quiz</button>
-      </div>
     </div>
   );
 }
