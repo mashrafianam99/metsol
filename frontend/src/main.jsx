@@ -783,6 +783,24 @@ function Dashboard({ setActive, user }) {
   const firstName = user?.name?.trim().split(/\s+/)[0] || "Student";
   const today = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const [noticeError, setNoticeError] = useState("");
+  const [due, setDue] = useState({ total: 0, count: 0, state: "loading" });
+
+  // Real outstanding fees: the sum of unpaid invoices (admins see the total across all students).
+  useEffect(() => {
+    let active = true;
+    apiFetch("/api/invoices")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load invoices.");
+        const unpaid = (await response.json()).filter((invoice) => invoice.status !== "PAID");
+        if (active) setDue({ total: unpaid.reduce((sum, invoice) => sum + Number(invoice.amount), 0), count: unpaid.length, state: "ready" });
+      })
+      .catch(() => { if (active) setDue((current) => ({ ...current, state: "error" })); });
+    return () => { active = false; };
+  }, []);
+  const dueHint = due.state === "loading" ? "Loading..."
+    : due.state === "error" ? "Couldn't load invoices"
+    : due.count ? `${due.count} unpaid invoice${due.count === 1 ? "" : "s"}${user?.role === "ADMIN" ? " · all students" : ""}`
+    : "All paid";
 
   useEffect(() => {
     let active = true;
@@ -824,7 +842,7 @@ function Dashboard({ setActive, user }) {
         <Stat icon="book" tone="indigo" title="Enrolled Courses" value={6} hint="This semester" />
         <Stat icon="clipboard" tone="amber" title="Assignments" value={8} hint="2 due this week" />
         <Stat icon="calendarCheck" tone="green" title="Attendance" value={87} suffix="%" hint="Above 75% minimum" meter={87} />
-        <Stat icon="wallet" tone="red" title="Due Payment" value={12500} prefix="৳" hint="Semester fee" />
+        <Stat icon="wallet" tone={due.total ? "red" : "green"} title="Due Payment" value={due.total} prefix="৳" hint={dueHint} />
       </section>
 
       <ClassroomUpcoming onOpen={() => setActive("Google Classroom")} />
