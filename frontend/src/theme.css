@@ -915,8 +915,6 @@ kbd {
 .app .course-card,
 .app .teacher-card,
 .app .notice-card,
-.app .resource-card,
-.app .quiz-card,
 .app .chat-card,
 .app .summary-card,
 .app .mini-panel,
@@ -941,9 +939,7 @@ kbd {
 .app .result-overview-card:hover { box-shadow: var(--shadow-sm); }
 .app .course-card:hover,
 .app .teacher-card:hover,
-.app .notice-card:hover,
-.app .resource-card:hover,
-.app .quiz-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--brand-soft-2); }
+.app .notice-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--brand-soft-2); }
 
 .app h1, .app h2, .app h3, .app h4 { color: var(--text); letter-spacing: -.01em; }
 .app p { color: inherit; }
@@ -956,7 +952,6 @@ kbd {
 .app .notice-row span,
 .app .notice-row small,
 .app .teacher-card p,
-.app .resource-card p,
 .app .notice-card p { color: var(--text-3); }
 .app .card-header button {
   padding: 7px 12px;
@@ -993,7 +988,6 @@ kbd {
 .app .notice-row:hover,
 .app .attendance-row:hover { background: var(--surface-2); }
 .app .course-icon,
-.app .resource-icon,
 .app .cover-choice-icon {
   background: var(--brand-soft);
   color: var(--brand);
@@ -1186,10 +1180,6 @@ kbd {
   font-size: 11.5px;
   font-weight: 700;
 }
-.app .resource-card { cursor: pointer; }
-.app .resource-card:hover .resource-icon { background: var(--brand); color: var(--on-brand); transform: rotate(-6deg) scale(1.06); }
-.app .resource-icon { transition: background var(--t-fast), color var(--t-fast), transform var(--t); }
-
 /* teachers */
 .app .teacher-photo, .app .teacher-avatar { border-radius: var(--r-md); }
 .app .teacher-avatar { background: var(--brand-soft); color: var(--brand); }
@@ -1260,10 +1250,6 @@ kbd {
 .app .chat-input button { font-size: 14.5px; }
 .app .chat-document-bar button,
 .app .chat-document-bar label { border-radius: 10px; }
-
-/* quiz */
-.app .quiz-card button { border-radius: 12px; transition: transform var(--t-fast), border-color var(--t-fast), background var(--t-fast); }
-.app .quiz-card button:hover { transform: translateX(3px); }
 
 /* Google Classroom page */
 .app .classroom-item { border-radius: var(--r-md); border-color: var(--border); background: var(--surface); transition: transform var(--t-fast), box-shadow var(--t-fast); }
