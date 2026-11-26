@@ -32,8 +32,11 @@ const OAUTH_MESSAGES = {
 
 function formatDue(dueAt) {
   if (!dueAt) return "No due date";
-  return new Date(dueAt).toLocaleString(undefined, {
-    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  const date = new Date(dueAt);
+  // Show the year only when it isn't this year, so "Sep 15" from 2024 isn't mistaken for this year.
+  const otherYear = date.getFullYear() !== new Date().getFullYear();
+  return date.toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric", ...(otherYear ? { year: "numeric" } : {}), hour: "numeric", minute: "2-digit",
   });
 }
 
@@ -252,9 +255,10 @@ export function ClassroomUpcoming({ onOpen }) {
       <div className="card-header">
         <div>
           <h3>Next in Google Classroom</h3>
-          <span>{status.connected ? "Assignments and lab work to submit" : "Connect to see your Classroom deadlines"}</span>
+          <span>{loading || status.connected ? "Assignments and lab work to submit" : "Connect to see your Classroom deadlines"}</span>
         </div>
-        <button onClick={onOpen}>{status.connected ? "View All" : "Connect"}</button>
+        {/* Status is unknown while loading, so don't offer "Connect" to an already-connected student. */}
+        {!loading && <button onClick={onOpen}>{status.connected ? "View All" : "Connect"}</button>}
       </div>
       {loading ? (
         <p className="classroom-muted">Loading...</p>

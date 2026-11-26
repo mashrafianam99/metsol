@@ -63,6 +63,23 @@ test("classifies coursework by the student's own submission state and due date",
   assert.deepEqual(items.map((item) => item.id), ["overdue", "upcoming", "undated", "done"]);
 });
 
+test("lists the most recently missed work first, so old missing work does not bury new deadlines", () => {
+  const items = buildStudentCoursework({
+    now: NOW,
+    courses: [course],
+    courseworkByCourse: {
+      c1: [
+        work({ id: "missed-2024", dueDate: { year: 2024, month: 9, day: 15 } }),
+        work({ id: "missed-last-week", dueDate: { year: 2026, month: 11, day: 4 } }),
+      ],
+    },
+    submissionsByCourse: {},
+    topicsByCourse: {},
+  });
+
+  assert.deepEqual(items.map((item) => item.id), ["missed-last-week", "missed-2024"]);
+});
+
 test("links to the student's own submission when available, falling back to the coursework link", () => {
   const [withSubmission, withoutSubmission] = buildStudentCoursework({
     now: NOW,

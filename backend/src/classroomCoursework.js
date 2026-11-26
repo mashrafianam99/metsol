@@ -41,7 +41,8 @@ function getStatus(submission, dueAt, now) {
 function compareItems(a, b) {
   const byStatus = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
   if (byStatus !== 0) return byStatus;
-  if (a.status === 'TURNED_IN') return (b.dueAt || '').localeCompare(a.dueAt || '');
+  // Most recent first for missing work too, matching Classroom's own "Missing" list.
+  if (a.status === 'TURNED_IN' || a.status === 'OVERDUE') return (b.dueAt || '').localeCompare(a.dueAt || '');
   if (a.status === 'NO_DUE_DATE') return (b.updatedAt || '').localeCompare(a.updatedAt || '');
   return (a.dueAt || '').localeCompare(b.dueAt || '');
 }
