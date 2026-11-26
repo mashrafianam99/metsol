@@ -26,13 +26,17 @@ function fakeDb(found) {
 test("converts invoice amounts to Stripe's smallest currency unit and rejects bad amounts", () => {
   assert.equal(toStripeAmount("12500.00"), 1250000);
   assert.equal(toStripeAmount(99.99), 9999);
+  // Prisma returns Decimal columns as objects that print as their value.
+  assert.equal(toStripeAmount({ toString: () => "100" }), 10000);
   for (const bad of [0, -5, "abc", null, Infinity]) assert.throws(() => toStripeAmount(bad));
 });
 
 test("only accepts Stripe test keys, so live money can't be charged by mistake", () => {
   assert.throws(() => getStripe(""), StripeConfigError);
   assert.throws(() => getStripe("sk_live_123"), StripeConfigError);
+  assert.throws(() => getStripe("rk_live_123"), StripeConfigError);
   assert.ok(getStripe("sk_test_123").checkout);
+  assert.ok(getStripe("rkcs_test_123").checkout);
 });
 
 test("builds a Checkout session priced from the invoice, returning to the portal", () => {

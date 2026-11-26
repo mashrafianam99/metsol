@@ -2,7 +2,8 @@
 // Stripe hosts the card form, so card details never reach this server.
 import Stripe from 'stripe';
 
-const TEST_KEY_PATTERN = /^(sk|rk)_test_/u;
+// sk_ = secret key, rk_ = restricted key, rkcs_ = restricted key of a CLI-created sandbox.
+const TEST_KEY_PATTERN = /^(sk|rk|rkcs)_test_/u;
 // Tags these sessions in the Stripe Dashboard; the random suffix is required by Stripe.
 const INTEGRATION_IDENTIFIER = 'portal_fees_qmvkzrta';
 
@@ -11,13 +12,14 @@ export class StripeConfigError extends Error {}
 export function getStripe(secretKey = process.env.STRIPE_SECRET_KEY) {
   if (!secretKey) throw new StripeConfigError('Stripe is not configured. Set STRIPE_SECRET_KEY in backend/.env.');
   // shortcut: test mode only, as agreed for this project; allow sk_live_/rk_live_ here before taking real payments.
-  if (!TEST_KEY_PATTERN.test(secretKey)) throw new StripeConfigError('Only Stripe test keys (sk_test_ or rk_test_) are allowed.');
+  if (!TEST_KEY_PATTERN.test(secretKey)) throw new StripeConfigError('Only Stripe test keys (sk_test_, rk_test_ or rkcs_test_) are allowed.');
   return new Stripe(secretKey);
 }
 
 // Stripe wants integers in the currency's smallest unit (BDT has 2 decimals: 12500.00 -> 1250000).
 export function toStripeAmount(amount) {
-  const value = typeof amount === 'number' || typeof amount === 'string' ? Number(amount) : NaN;
+  // String() also covers Prisma Decimal objects; null, booleans and '' become NaN or 0 and are rejected below.
+  const value = Number(String(amount));
   const minor = Math.round(value * 100);
   if (!Number.isSafeInteger(minor) || minor <= 0) throw new Error(`Invalid payment amount: ${amount}`);
   return minor;
