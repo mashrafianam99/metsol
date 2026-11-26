@@ -8,9 +8,12 @@ import { getAuthenticatedStudentResultFilter } from './result-import/studentResu
 import { generateAssistantResponse } from './ai.js';
 import { AiDocumentError, extractAiDocument, MAX_AI_DOCUMENT_BYTES, MAX_AI_DOCUMENT_TEXT } from './aiDocuments.js';
 import { createTransportRouter } from './transportRoutes.js';
+import { applyCheckoutSession, buildCheckoutParams, getStripe, StripeConfigError } from './stripePayments.js';
 import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, getStudentCourseworkForUser, GoogleReconnectRequiredError } from './googleClassroom.js';
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client'; import { createClient } from '@supabase/supabase-js';
-const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); app.use(express.json({limit:'2mb'})); app.use(rateLimit({windowMs:15*60*1000,limit:300}));
+const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); const STRIPE_WEBHOOK_PATH='/api/payments/stripe/webhook', jsonBody=express.json({limit:'2mb'});
+// Stripe's webhook signature is checked against the raw body, so that one route must skip JSON parsing.
+app.use((req,res,next)=>req.path===STRIPE_WEBHOOK_PATH?next():jsonBody(req,res,next)); app.use(rateLimit({windowMs:15*60*1000,limit:300}));
 const supabaseUrl=process.env.SUPABASE_URL, supabaseAnonKey=process.env.SUPABASE_ANON_KEY;
 if(!supabaseUrl||!supabaseAnonKey)throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set. See backend/.env.example.');
 const supabase=createClient(supabaseUrl,supabaseAnonKey,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
@@ -254,79 +257,115 @@ app.post('/api/courses/:id/register',auth,roles('STUDENT'),async(req,res)=>{try{
 app.post('/api/notices',auth,roles('ADMIN','TEACHER'),async(req,res)=>res.status(201).json(await db.notice.create({data:{title:req.body.title,body:req.body.body,audience:req.body.audience||'ALL',authorId:req.user.id}})));
 app.get('/api/assignments',auth,async(_,res)=>res.json(await db.assignment.findMany({include:{course:true},orderBy:{dueAt:'asc'}})));
 app.post('/api/assignments',auth,roles('ADMIN','TEACHER'),async(req,res)=>res.status(201).json(await db.assignment.create({data:{title:req.body.title,description:req.body.description,courseId:req.body.courseId,teacherId:req.user.id,dueAt:req.body.dueAt?new Date(req.body.dueAt):null}})));
-app.post('/api/payments/initiate', auth, roles('STUDENT'), async (req, res) => {
-    try {
-      const { invoiceId, provider } = req.body;
-  
-      // Validate invoice ID
-      if (!invoiceId) {
-        return res.status(400).json({
-          error: 'Invoice ID is required'
-        });
-      }
-  
-      // Validate payment provider
-      if (!['BKASH', 'NAGAD'].includes(provider)) {
-        return res.status(400).json({
-          error: 'Invalid payment provider'
-        });
-      }
-  
-      // Find invoice belonging to this student
-      const invoice = await db.feeInvoice.findFirst({
-        where: {
-          id: invoiceId,
-          studentId: req.user.id
-        }
-      });
-  
-      if (!invoice) {
-        return res.status(404).json({
-          error: 'Invoice not found'
-        });
-      }
-  
-      // Prevent paying an already-paid invoice
-      if (invoice.status === 'PAID') {
-        return res.status(400).json({
-          error: 'This invoice is already paid'
-        });
-      }
-  
-      // Generate unique payment reference
-      const reference = randomUUID();
-  
-      // Create pending payment attempt
-      const payment = await db.paymentAttempt.create({
-        data: {
-          reference,
-          invoiceId: invoice.id,
-          provider,
-          amount: invoice.amount,
-          currency: invoice.currency,
-          status: 'PENDING'
-        }
-      });
-  
-      return res.status(202).json({
-        success: true,
-        paymentId: payment.id,
-        reference: payment.reference,
-        amount: payment.amount.toString(),
-        currency: payment.currency,
-        provider: payment.provider,
-        status: 'PENDING',
-        message: 'Payment attempt created. Gateway integration is not configured yet.'
-      });
-  
-    } catch (error) {
-      console.error('Payment initiation error:', error);
-  
-      return res.status(500).json({
-        error: 'Unable to initiate payment'
-      });
-    }
+// ---------- Fee invoices and Stripe Checkout ----------
+const MAX_INVOICE_AMOUNT = 10_000_000;
+const INVOICE_INCLUDE = { payments: { orderBy: { createdAt: 'desc' }, select: { id: true, reference: true, provider: true, amount: true, currency: true, status: true, verifiedAt: true, createdAt: true } } };
+const INVOICE_STUDENT = { student: { select: { id: true, name: true, email: true, studentId: true } } };
+const sendStripeError = (res, error, message) => {
+  if (error instanceof StripeConfigError) return res.status(503).json({ error: error.message });
+  console.error(message, error);
+  return res.status(502).json({ error: message });
+};
+
+app.get('/api/invoices', auth, async (req, res) => {
+  const isAdmin = req.user.role === 'ADMIN';
+  res.json(await db.feeInvoice.findMany({
+    where: isAdmin ? {} : { studentId: req.user.id },
+    include: isAdmin ? { ...INVOICE_INCLUDE, ...INVOICE_STUDENT } : INVOICE_INCLUDE,
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  }));
+});
+
+app.post('/api/invoices', auth, roles('ADMIN'), async (req, res) => {
+  const { studentId, feeType, description, amount, dueDate } = req.body || {};
+  const fee = String(feeType ?? '').trim();
+  const details = String(description ?? '').trim();
+  const value = Number(amount);
+  const due = dueDate ? new Date(dueDate) : null;
+  if (typeof studentId !== 'string' || !studentId) return res.status(400).json({ error: 'Choose a student.' });
+  if (!fee || fee.length > 80) return res.status(400).json({ error: 'Fee type is required (up to 80 characters).' });
+  if (details.length > 500) return res.status(400).json({ error: 'Description can be up to 500 characters.' });
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_INVOICE_AMOUNT || Math.round(value * 100) / 100 !== value)
+    return res.status(400).json({ error: 'Enter an amount in taka above 0, with at most 2 decimals.' });
+  if (due && Number.isNaN(due.getTime())) return res.status(400).json({ error: 'Due date is not valid.' });
+  const student = await db.user.findFirst({ where: { id: studentId, role: 'STUDENT' }, select: { id: true } });
+  if (!student) return res.status(404).json({ error: 'Student not found.' });
+  const invoice = await db.feeInvoice.create({
+    data: {
+      invoiceNumber: `INV-${new Date().getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`,
+      studentId, feeType: fee, description: details || null, amount: value.toFixed(2), currency: 'BDT', dueDate: due, status: 'UNPAID',
+    },
+    include: { ...INVOICE_INCLUDE, ...INVOICE_STUDENT },
   });
+  res.status(201).json(invoice);
+});
+
+app.post('/api/payments/checkout', auth, roles('STUDENT'), async (req, res) => {
+  try {
+    const stripe = getStripe();
+    const invoiceId = req.body?.invoiceId;
+    if (typeof invoiceId !== 'string' || !invoiceId) return res.status(400).json({ error: 'Invoice ID is required.' });
+    const invoice = await db.feeInvoice.findFirst({ where: { id: invoiceId, studentId: req.user.id } });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found.' });
+    if (invoice.status === 'PAID') return res.status(400).json({ error: 'This invoice is already paid.' });
+
+    // Reuse a still-open session, so a double click can't create two payable sessions for one invoice.
+    const open = await db.paymentAttempt.findFirst({ where: { invoiceId, provider: 'STRIPE', status: 'PENDING', providerPaymentId: { not: null } }, orderBy: { createdAt: 'desc' } });
+    if (open) {
+      const existing = await stripe.checkout.sessions.retrieve(open.providerPaymentId);
+      if (existing.status === 'open' && existing.url) return res.json({ url: existing.url });
+      if ((await applyCheckoutSession(db, existing)).status === 'SUCCESS') return res.status(400).json({ error: 'This invoice is already paid.' });
+    }
+
+    const attempt = await db.paymentAttempt.create({ data: { reference: randomUUID(), invoiceId, provider: 'STRIPE', amount: invoice.amount, currency: invoice.currency, status: 'PENDING' } });
+    try {
+      const session = await stripe.checkout.sessions.create(buildCheckoutParams({ invoice, attempt, frontendBaseUrl, customerEmail: req.user.email }));
+      await db.paymentAttempt.update({ where: { id: attempt.id }, data: { providerPaymentId: session.id } });
+      return res.json({ url: session.url });
+    } catch (error) {
+      await db.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'FAILED' } });
+      throw error;
+    }
+  } catch (error) {
+    return sendStripeError(res, error, 'Unable to start the Stripe payment.');
+  }
+});
+
+// Backup for the webhook: when the student returns from Checkout, ask Stripe directly for the session's state.
+app.post('/api/payments/stripe/confirm', auth, async (req, res) => {
+  try {
+    const sessionId = req.body?.sessionId;
+    if (typeof sessionId !== 'string' || !/^cs_(test|live)_[A-Za-z0-9]+$/u.test(sessionId)) return res.status(400).json({ error: 'Invalid Stripe session.' });
+    const attempt = await db.paymentAttempt.findUnique({ where: { providerPaymentId: sessionId }, include: { invoice: { select: { studentId: true } } } });
+    if (!attempt || attempt.invoice.studentId !== req.user.id) return res.status(404).json({ error: 'Payment not found.' });
+    const session = await getStripe().checkout.sessions.retrieve(sessionId);
+    res.json({ status: (await applyCheckoutSession(db, session)).status });
+  } catch (error) {
+    return sendStripeError(res, error, 'Unable to check the Stripe payment.');
+  }
+});
+
+app.post(STRIPE_WEBHOOK_PATH, express.raw({ type: 'application/json' }), async (req, res) => {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) return res.status(503).json({ error: 'Stripe webhook secret is not configured.' });
+  let event;
+  try {
+    event = getStripe().webhooks.constructEvent(req.body, req.headers['stripe-signature'], secret);
+  } catch (error) {
+    if (error instanceof StripeConfigError) return res.status(503).json({ error: error.message });
+    return res.status(400).json({ error: 'Invalid Stripe signature.' });
+  }
+  try {
+    const session = event.data.object;
+    if (['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.expired'].includes(event.type)) await applyCheckoutSession(db, session);
+    else if (event.type === 'checkout.session.async_payment_failed') await applyCheckoutSession(db, session, { failed: true });
+    res.json({ received: true });
+  } catch (error) {
+    console.error('Stripe webhook error:', error);
+    res.status(500).json({ error: 'Webhook handling failed.' }); // Stripe retries on 5xx
+  }
+});
 app.get('/api/payments',auth,async(req,res)=>res.json(await db.payment.findMany({where:req.user.role==='STUDENT'?{studentId:req.user.id}:{},orderBy:{createdAt:'desc'}})));
 app.post('/api/ai/chat',auth,async(req,res)=>{
   const messages=req.body?.messages;

@@ -29,6 +29,7 @@
     "multer": "^2.0.2",
     "pdfjs-dist": "^4.10.38",
     "prisma": "^6.16.2",
+    "stripe": "^23.2.0",
     "zod": "^4.1.5"
   },
   "overrides": {

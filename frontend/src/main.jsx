@@ -7,6 +7,7 @@ import { supabase } from "./supabase.js";
 import { apiFetch, apiUrl, getAccessToken, readJson, signOut } from "./api.js";
 import { ClassroomUpcoming, GoogleClassroom } from "./GoogleClassroom.jsx";
 import CommandPalette from "./CommandPalette.jsx";
+import Payments from "./Payments.jsx";
 import { Icon } from "./icons.jsx";
 import "./style.css";
 import "./theme.css";
@@ -508,10 +509,12 @@ const NAV_ITEMS = [
 ];
 
 function App() {
-  // Returning from the Google OAuth callback (?googleClassroom=...) should land on the Classroom page.
-  const [active, setActive] = useState(() =>
-    new URLSearchParams(window.location.search).has("googleClassroom") ? "Google Classroom" : "Dashboard"
-  );
+  // Returning from Google OAuth (?googleClassroom=...) or Stripe Checkout (?payment=...) lands on that page.
+  const [active, setActive] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("googleClassroom")) return "Google Classroom";
+    return params.has("payment") ? "Payments" : "Dashboard";
+  });
   // Light by default; dark only when the student picks it with the toggle.
   const [dark, setDark] = useState(() => readPreference(THEME_KEY) === "dark");
   const [collapsed, setCollapsed] = useState(() => readPreference(SIDEBAR_KEY) === "1");
@@ -741,7 +744,7 @@ function App() {
           {active === "Teachers" && <Teachers />}
           {active === "Assignments" && <Assignments user={user} />}
           {active === "Google Classroom" && <GoogleClassroom />}
-          {active === "Payments" && <Payments />}
+          {active === "Payments" && <Payments user={user} />}
           {active === "Attendance" && <Attendance />}
           {active === "Results" && <Results key={user.role} user={user} />}
           {active === "Notices" && <Notices />}
@@ -1394,144 +1397,6 @@ function Assignments({ user }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function Payments() {
-    const [showPaymentForm, setShowPaymentForm] = useState(false);
-    const [provider, setProvider] = useState("BKASH");
-    const [invoiceId, setInvoiceId] = useState("");
-    const [paymentMessage, setPaymentMessage] = useState("");
-    const handlePayment = async () => {
-      if (!invoiceId.trim()) {
-        setPaymentMessage("Please enter your Invoice ID.");
-        return;
-      }
-    
-      try {
-        const response = await apiFetch(
-          "/api/payments/initiate",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              invoiceId: invoiceId.trim(),
-              provider,
-            }),
-          }
-        );
-    
-        const data = await readJson(response);
-    
-        if (!response.ok) {
-          setPaymentMessage(
-            data.error || "Payment could not be initiated."
-          );
-          return;
-        }
-    
-        setPaymentMessage(
-          `Payment request created. Reference: ${
-            data.reference || "N/A"
-          } — Status: PENDING`
-        );
-      } catch (error) {
-        setPaymentMessage("Unable to connect to the payment server.");
-      }
-    };
-  return (
-    <>
-      <div className="stats-grid">
-        <Stat icon="wallet" tone="indigo" title="Semester Fee" value={45000} prefix="৳" hint="Spring semester" />
-        <Stat icon="check" tone="green" title="Paid" value={32500} prefix="৳" hint="72% of total" meter={72} />
-        <Stat icon="alert" tone="red" title="Remaining" value={12500} prefix="৳" hint="Due before exams" />
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3>Payment History</h3>
-            <span>Your recent university payments</span>
-          </div>
-          <button
-  className="primary-button"
-  onClick={() => setShowPaymentForm(true)}
->
-  Make Payment
-</button>
-        </div>
-
-        <div className="table">
-          {[
-            ["Semester Fee", "৳20,000", "Sep 15, 2026", "SUCCESS"],
-            ["Tuition Fee", "৳12,500", "Aug 20, 2026", "SUCCESS"],
-            ["Registration", "৳5,000", "Aug 5, 2026", "SUCCESS"],
-          ].map((p) => (
-            <div className="table-row" key={p[0]}>
-              <strong>{p[0]}</strong>
-              <span>{p[1]}</span>
-              <span>{p[2]}</span>
-              <span className="badge success">{p[3]}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-      {showPaymentForm && (
-  <div className="card payment-form-card">
-    <div className="card-header">
-      <div>
-        <h3>Make Payment</h3>
-        <span>Pay your university fee</span>
-      </div>
-    </div>
-
-    <div className="payment-form">
-      <label>
-        Invoice ID
-        <input
-          type="text"
-          value={invoiceId}
-          onChange={(e) => setInvoiceId(e.target.value)}
-          placeholder="Enter invoice ID"
-        />
-      </label>
-
-      <label>
-        Payment Method
-        <select
-          value={provider}
-          onChange={(e) => setProvider(e.target.value)}
-        >
-          <option value="BKASH">bKash</option>
-          <option value="NAGAD">Nagad</option>
-        </select>
-      </label>
-
-      <div className="payment-actions">
-        <button
-          className="primary-button"
-          onClick={handlePayment}
-        >
-          Pay Now
-        </button>
-
-        <button
-          className="secondary-button"
-          onClick={() => setShowPaymentForm(false)}
-        >
-          Cancel
-        </button>
-      </div>
-
-      {paymentMessage && (
-        <p className="payment-message">{paymentMessage}</p>
-      )}
-    </div>
-  </div>
-)}
-    </>
   );
 }
 

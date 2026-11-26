@@ -1,0 +1,21 @@
+/* Payments page: layout only; colours, inputs and cards come from theme.css tokens. */
+.payment-stat { display: flex; flex-direction: column; gap: 6px; }
+.payment-stat span, .payment-stat small { color: var(--text-3); font-size: 12px; }
+.payment-stat strong { font-size: 24px; }
+.payment-stat strong.success { color: var(--success); }
+.payment-stat strong.warning { color: var(--warning); }
+
+.payment-table .table-row { grid-template-columns: 1.6fr 1fr 1fr 0.7fr minmax(140px, auto); }
+.payment-table .table-row > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.payment-table .table-row small { color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
+.payment-muted { color: var(--text-3); font-size: 13px; }
+.app .payment-message { margin: 0 0 16px; padding: 10px 14px; }
+
+.payment-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.payment-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.payment-form-wide { grid-column: 1 / -1; }
+
+@media (max-width: 720px) {
+  .payment-form { grid-template-columns: 1fr; }
+  .payment-table .table-row { grid-template-columns: 1fr; }
+}
