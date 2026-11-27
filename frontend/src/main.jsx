@@ -11,6 +11,7 @@ import Payments from "./Payments.jsx";
 import { Icon } from "./icons.jsx";
 import "./style.css";
 import "./theme.css";
+import "./results.css";
 
 const GRADE_OPTIONS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "D", "F", "I", "W", "S", "AB"];
 const Transport = React.lazy(() => import("./Transport.jsx"));
@@ -29,6 +30,16 @@ const calculateCourseSummary = (course = {}) => {
     earned: isEarnedCredit(grade),
     attemptedCredits: Number.isFinite(creditValue) && creditValue > 0 ? creditValue : 0,
   };
+};
+
+// Colour band for a letter grade, used by the grade chips on the Results page.
+const gradeTone = (grade = "") => {
+  if (/^A/u.test(grade)) return "excellent";
+  if (/^B/u.test(grade)) return "good";
+  if (/^C/u.test(grade)) return "fair";
+  if (grade === "D") return "pass";
+  if (grade === "F") return "fail";
+  return "neutral";
 };
 
 const calculateCourseRowsSummary = (courseRows) => {
@@ -2179,7 +2190,7 @@ function OfficialUniversityResult({ onOfficialResult }) {
                     <strong data-label="Course">{record.courseTitle || "—"}</strong>
                     <span data-label="Credit">{record.credits}</span>
                     <span data-label="Marks">{record.marks ?? "—"}</span>
-                    <span data-label="Grade">{record.grade}</span>
+                    <span data-label="Grade"><b className={`grade-chip ${gradeTone(record.grade)}`}>{record.grade}</b></span>
                     <span data-label="Grade Point">{Number(record.gradePoint).toFixed(2)}</span>
                   </div>
                 ))}
@@ -2218,7 +2229,12 @@ function OfficialUniversityResult({ onOfficialResult }) {
                           <td>{[semester.semester, semester.academicYear].filter(Boolean).join(" · ") || `Term ${index + 1}`}</td>
                           <td>{semester.credits === undefined ? "—" : Number(semester.credits).toFixed(1)}</td>
                           <td>{semester.gpa === null ? "—" : Number(semester.gpa).toFixed(2)}</td>
-                          <td><strong>{semester.cgpa === null ? "—" : Number(semester.cgpa).toFixed(2)}</strong></td>
+                          <td>
+                            <div className="cgpa-cell">
+                              <strong>{semester.cgpa === null ? "—" : Number(semester.cgpa).toFixed(2)}</strong>
+                              {semester.cgpa !== null && <span className="cgpa-bar" aria-hidden="true"><i style={{ width: `${Math.min(100, (Number(semester.cgpa) / 4) * 100)}%` }} /></span>}
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

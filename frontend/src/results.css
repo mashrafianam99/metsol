@@ -1,0 +1,164 @@
+/* ==========================================================================
+   Results page polish: hover states, entrance motion, grade chips.
+   Loaded after theme.css; everything is scoped to .results-page.
+   ========================================================================== */
+html { scroll-behavior: smooth; }
+.app .results-page #official-result,
+.app .results-page #cgpa-calculator { scroll-margin-top: 96px; }
+
+/* ---------- Entrance: sections rise in one after another ---------- */
+@keyframes results-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes results-pop { 0% { opacity: 0; transform: scale(.96); } 60% { opacity: 1; transform: scale(1.015); } 100% { transform: scale(1); } }
+@keyframes cgpa-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.app .results-page > * { animation: results-rise .45s var(--ease) backwards; }
+.app .results-page > *:nth-child(2) { animation-delay: .06s; }
+.app .results-page > *:nth-child(3) { animation-delay: .12s; }
+.app .results-page > *:nth-child(4) { animation-delay: .18s; }
+.app .results-page .results-overview > * { animation: results-rise .45s var(--ease) backwards; }
+.app .results-page .results-overview > *:nth-child(2) { animation-delay: .1s; }
+.app .results-page .results-overview > *:nth-child(3) { animation-delay: .16s; }
+.app .results-page .results-overview > *:nth-child(4) { animation-delay: .22s; }
+
+/* ---------- Hero ---------- */
+.app .results-page .results-student-card { transition: transform var(--t), box-shadow var(--t), border-color var(--t); }
+.app .results-page .results-student-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--brand-soft-2); }
+.app .results-page .results-student-avatar {
+  box-shadow: 0 0 0 4px var(--surface), 0 0 0 6px color-mix(in srgb, var(--mu-red) 35%, transparent);
+  transition: transform var(--t);
+}
+.app .results-page .results-student-card:hover .results-student-avatar { transform: scale(1.06) rotate(-4deg); }
+.app .results-page .results-section-nav a:focus-visible { outline: 3px solid var(--brand-ring); outline-offset: 2px; }
+
+/* ---------- Overview stat cards ---------- */
+.app .results-page .result-overview-card { position: relative; overflow: hidden; cursor: default; }
+.app .results-page .result-overview-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--brand), var(--mu-red));
+  transform: scaleX(.25);
+  transform-origin: left;
+  opacity: .7;
+  transition: transform var(--t), opacity var(--t);
+}
+.app .results-page .result-overview-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: var(--brand-soft-2); }
+.app .results-page .result-overview-card:hover::before { transform: scaleX(1); opacity: 1; }
+.app .results-page .result-overview-card strong { font-variant-numeric: tabular-nums; transition: color var(--t-fast); }
+.app .results-page .result-overview-card:hover strong { color: var(--brand); }
+
+/* The CGPA card is the hero figure */
+.app .results-page .result-overview-card.result-overview-primary {
+  background:
+    radial-gradient(260px 160px at 100% 0%, rgba(255, 255, 255, .16), transparent 70%),
+    linear-gradient(135deg, var(--mu-navy-deep) 0%, var(--mu-navy) 45%, #3442d4 100%);
+  border-color: transparent;
+  box-shadow: 0 12px 28px rgba(27, 32, 104, .28);
+}
+.app .results-page .result-overview-card.result-overview-primary::before {
+  background: linear-gradient(90deg, #ff8a5c, var(--mu-red));
+  transform: scaleX(1);
+  opacity: 1;
+}
+.app .results-page .result-overview-primary span,
+.app .results-page .result-overview-primary small { color: rgba(255, 255, 255, .78); }
+.app .results-page .result-overview-card.result-overview-primary strong,
+.app .results-page .result-overview-card.result-overview-primary:hover strong { color: #fff; }
+.app .results-page .result-overview-primary .result-scale { color: rgba(255, 255, 255, .6); }
+.app .results-page .result-overview-card.result-overview-primary:hover { transform: translateY(-4px); box-shadow: 0 18px 38px rgba(27, 32, 104, .38); }
+
+/* ---------- Official result ---------- */
+.app .results-page .official-result-table-row { position: relative; transition: background var(--t-fast), box-shadow var(--t-fast); }
+.app .results-page .official-result-table-row:hover { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); }
+.app .results-page .official-result-summary > div { transition: transform var(--t), box-shadow var(--t), border-color var(--t); }
+.app .results-page .official-result-summary > div:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); border-color: var(--brand-soft-2); }
+.app .results-page .official-result-summary > .official-cgpa {
+  background: linear-gradient(135deg, var(--brand-soft), var(--surface));
+  border-color: var(--brand-soft-2);
+}
+
+/* Grade chips */
+.grade-chip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 36px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  transition: transform var(--t-fast);
+}
+.official-result-table-row:hover .grade-chip { transform: scale(1.08); }
+.grade-chip.excellent { background: var(--success-soft); color: var(--success); }
+.grade-chip.good { background: var(--info-soft); color: var(--info); }
+.grade-chip.fair { background: var(--warning-soft); color: var(--warning); }
+.grade-chip.pass { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--warning); }
+.grade-chip.fail { background: var(--danger-soft); color: var(--danger); }
+.grade-chip.neutral { background: var(--surface-3); color: var(--text-2); }
+
+/* Semester-by-semester CGPA table */
+.cgpa-progress tbody tr { transition: background var(--t-fast); }
+.cgpa-progress tbody tr:hover { background: var(--surface-2); }
+.cgpa-progress tbody tr:last-child { background: var(--brand-soft); }
+.cgpa-progress tbody tr:last-child td:first-child { box-shadow: inset 3px 0 0 var(--brand); font-weight: 700; color: var(--text); }
+.cgpa-cell { display: flex; align-items: center; gap: 10px; min-width: 130px; }
+.cgpa-bar { flex: 1; max-width: 90px; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.cgpa-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand), var(--success));
+  transform-origin: left;
+  animation: cgpa-fill .9s var(--ease) both;
+}
+
+/* ---------- CGPA calculator ---------- */
+.app .results-page .cgpa-previous { transition: box-shadow var(--t), border-color var(--t); }
+.app .results-page .cgpa-previous:focus-within { border-color: var(--brand); box-shadow: 0 0 0 4px var(--brand-ring); }
+.app .results-page .calculator-table-row { transition: background var(--t-fast), box-shadow var(--t-fast); }
+.app .results-page .calculator-table-row:hover,
+.app .results-page .calculator-table-row:focus-within { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--brand); }
+.app .results-page .calculator-table-row input,
+.app .results-page .calculator-table-row select { transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.app .results-page .calculator-table-row input:hover,
+.app .results-page .calculator-table-row select:hover { border-color: var(--border-strong); }
+.app .results-page .calculator-table-row input:focus,
+.app .results-page .calculator-table-row select:focus { outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.app .results-page .calculator-value.earned { color: var(--success); font-weight: 700; }
+.app .results-page .calculator-value.not-earned { color: var(--danger); font-weight: 700; }
+.app .results-page .remove-row-button { transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), transform var(--t-fast); }
+.app .results-page .remove-row-button:hover:not(:disabled) { transform: rotate(90deg); }
+.app .results-page .primary-button,
+.app .results-page .secondary-button {
+  transition: transform var(--t-fast), box-shadow var(--t-fast), background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.app .results-page .primary-button:hover:not(:disabled),
+.app .results-page .secondary-button:hover:not(:disabled) { transform: translateY(-1px); }
+.app .results-page .primary-button:active:not(:disabled),
+.app .results-page .secondary-button:active:not(:disabled) { transform: translateY(0); }
+
+.app .results-page .cgpa-headline { animation: results-pop .5s var(--ease) backwards; box-shadow: 0 12px 28px rgba(27, 32, 104, .25); }
+.app .results-page .summary-grid > div { transition: transform var(--t), box-shadow var(--t), border-color var(--t); animation: results-rise .4s var(--ease) backwards; }
+.app .results-page .summary-grid > div:nth-child(2) { animation-delay: .05s; }
+.app .results-page .summary-grid > div:nth-child(3) { animation-delay: .1s; }
+.app .results-page .summary-grid > div:nth-child(4) { animation-delay: .15s; }
+.app .results-page .summary-grid > div:nth-child(5) { animation-delay: .2s; }
+.app .results-page .summary-grid > div:hover { transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+
+.app .results-page .mini-panel:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--brand-soft-2); }
+.app .results-page .mini-panel input { transition: border-color var(--t-fast), box-shadow var(--t-fast); }
+.app .results-page .mini-panel input:focus { outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-ring); }
+.app .results-page .grade-output > div { animation: results-pop .35s var(--ease) backwards; transition: transform var(--t-fast); }
+.app .results-page .grade-output > div:hover { transform: scale(1.03); }
+
+/* ---------- Respect reduced-motion preferences ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .app .results-page *,
+  .app .results-page *::before,
+  .app .results-page *::after { animation: none !important; transition: none !important; }
+  .app .results-page *:hover { transform: none !important; }
+}
