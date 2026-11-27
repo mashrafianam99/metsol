@@ -646,7 +646,7 @@ function App() {
     );
   }
 
-  const isAdmin = user.role === "ADMIN";
+  const isAdmin = user.role === "ADMIN" || user.role === "TEACHER"; // teachers get the console with only the Attendance section
   if (isAdmin && !portalView) {
     return (
       <React.Suspense fallback={<div className="splash" role="status"><p>Loading admin console…</p></div>}>
@@ -722,9 +722,9 @@ function App() {
 
         <div className="sb-footer">
           {isAdmin && (
-            <button type="button" className="sb-item" onClick={() => setPortalView(false)} data-tip="Admin console">
+            <button type="button" className="sb-item" onClick={() => setPortalView(false)} data-tip={user.role === "TEACHER" ? "Teacher console" : "Admin console"}>
               <Icon name="shield" size={18} />
-              <span>Admin console</span>
+              <span>{user.role === "TEACHER" ? "Teacher console" : "Admin console"}</span>
             </button>
           )}
           <button type="button" className="sb-item" onClick={handleLogout} data-tip="Sign out">
@@ -1454,35 +1454,46 @@ function Assignments({ user }) {
   );
 }
 
+const attendanceLabel = (percent) => (percent >= 90 ? "Excellent" : percent >= 75 ? "Good" : "Below 75% minimum");
+
 function Attendance() {
-  const data = [
-    ["Artificial Intelligence", "92%", "Excellent"],
-    ["Database Management", "88%", "Good"],
-    ["Data Visualization", "81%", "Good"],
-    ["Software Engineering", "95%", "Excellent"],
-  ];
+  const [state, setState] = useState({ courses: null, error: "" });
+  useEffect(() => {
+    let active = true;
+    apiFetch("/api/attendance/me")
+      .then(async (response) => {
+        const data = await readJson(response);
+        if (!response.ok) throw new Error(data.error || "Could not load your attendance.");
+        if (active) setState({ courses: data, error: "" });
+      })
+      .catch((error) => active && setState({ courses: [], error: error.message }));
+    return () => { active = false; };
+  }, []);
 
   return (
     <div className="card">
       <div className="card-header">
         <div>
           <h3>Attendance</h3>
-          <span>Current semester attendance</span>
+          <span>Recorded by your teachers · late counts as attended</span>
         </div>
       </div>
 
-      {data.map((item) => (
-        <div className="attendance-row" key={item[0]}>
+      {state.error && <p role="alert">{state.error}</p>}
+      {!state.courses && <p>Loading attendance…</p>}
+      {state.courses?.length === 0 && !state.error && <p>No attendance has been recorded for you yet.</p>}
+      {state.courses?.map((course) => (
+        <div className="attendance-row" key={course.courseId}>
           <div>
-            <strong>{item[0]}</strong>
-            <span>{item[2]}</span>
+            <strong>{course.code} · {course.title}</strong>
+            <span>{attendanceLabel(course.percent)} · {course.present + course.late} of {course.total} classes{course.late ? ` (${course.late} late)` : ""}</span>
           </div>
 
           <div className="attendance-progress">
             <div className="progress">
-              <div style={{ width: item[1] }} />
+              <div style={{ width: `${course.percent}%` }} />
             </div>
-            <strong>{item[1]}</strong>
+            <strong>{course.percent}%</strong>
           </div>
         </div>
       ))}

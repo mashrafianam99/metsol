@@ -145,7 +145,7 @@
 .ad-card-head h2 { margin: 0; font-size: 16.5px; font-weight: 700; }
 .ad-card-head p { margin: 4px 0 0; font-size: 13px; color: var(--text-3); }
 .ad-card-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.ad-card-actions select, .ad-toolbar select {
+.ad-card-actions select, .ad-toolbar select, .ad-toolbar .ad-input {
   height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-strong);
   background: var(--surface); color: var(--text); font: inherit; font-size: 13.5px;
 }
@@ -366,3 +366,7 @@ button.ad-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md);
   .ad-top-title h1 { font-size: 18px; }
   .ad-hero h2 { font-size: 23px; }
 }
+
+/* Attendance: Present / Late / Absent buttons per student */
+.ad-att-choice { display: inline-flex; gap: 6px; }
+.ad-att-choice .ad-btn.sm { min-width: 72px; justify-content: center; }

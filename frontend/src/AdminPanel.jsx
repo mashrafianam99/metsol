@@ -11,9 +11,13 @@ const SECTIONS = [
   { id: "notices", label: "Notices", icon: "megaphone", group: "Communication" },
   { id: "payments", label: "Fees & invoices", icon: "wallet", group: "Finance" },
   { id: "results", label: "Official results", icon: "chart", group: "Academics" },
+  { id: "courses", label: "Courses", icon: "book", group: "Academics" },
+  { id: "attendance", label: "Attendance", icon: "calendarCheck", group: "Academics", teachers: true },
   { id: "transport", label: "Transport", icon: "bus", group: "Campus" },
 ];
-const GROUPS = [...new Set(SECTIONS.map((section) => section.group))];
+const sectionsFor = (role) => SECTIONS.filter((section) => role === "ADMIN" || (role === "TEACHER" && section.teachers));
+const ATTENDANCE_LABELS = { PRESENT: "Present", LATE: "Late", ABSENT: "Absent" };
+const todayIso = () => new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
 const ROLE_LABELS = { STUDENT: "Student", TEACHER: "Teacher", ADMIN: "Administrator", TRANSPORT_ADMIN: "Transport admin" };
 const CATEGORY_LABELS = { GENERAL: "General", ACADEMIC: "Academic", EXAM: "Exam", EVENT: "Event", URGENT: "Urgent", TRANSPORT: "Transport" };
 const AUDIENCE_LABELS = { ALL: "Everyone", STUDENT: "Students", TEACHER: "Teachers" };
@@ -200,9 +204,12 @@ function ConsoleProvider({ children }) {
 
 // ---------- shell ----------
 export default function AdminPanel({ user, dark, onToggleTheme, onSignOut, onOpenPortal }) {
-  const [section, setSection] = useState("overview");
+  const sections = sectionsFor(user.role);
+  const groups = [...new Set(sections.map((item) => item.group))];
+  const isTeacher = user.role === "TEACHER";
+  const [section, setSection] = useState(sections[0].id);
   const [navOpen, setNavOpen] = useState(false);
-  const current = SECTIONS.find((item) => item.id === section);
+  const current = sections.find((item) => item.id === section);
   const go = (id) => {
     setSection(id);
     setNavOpen(false);
@@ -217,15 +224,15 @@ export default function AdminPanel({ user, dark, onToggleTheme, onSignOut, onOpe
           <div className="ad-brand">
             <div className="ad-brand-mark">MU</div>
             <div>
-              <strong>Admin Console</strong>
+              <strong>{isTeacher ? "Teacher Console" : "Admin Console"}</strong>
               <span>Metropolitan University</span>
             </div>
           </div>
           <nav className="ad-nav">
-            {GROUPS.map((group) => (
+            {groups.map((group) => (
               <div key={group} className="ad-nav-group">
                 <span className="ad-nav-label">{group}</span>
-                {SECTIONS.filter((item) => item.group === group).map((item) => (
+                {sections.filter((item) => item.group === group).map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -267,7 +274,7 @@ export default function AdminPanel({ user, dark, onToggleTheme, onSignOut, onOpe
                 <span className="ad-avatar">{initialsOf(user.name)}</span>
                 <div>
                   <strong>{user.name}</strong>
-                  <span><Icon name="shield" size={12} /> Administrator</span>
+                  <span><Icon name="shield" size={12} /> {isTeacher ? `Teacher${user.department ? ` · ${user.department}` : ""}` : "Administrator"}</span>
                 </div>
               </div>
             </div>
@@ -279,6 +286,8 @@ export default function AdminPanel({ user, dark, onToggleTheme, onSignOut, onOpe
             {section === "notices" && <Notices />}
             {section === "payments" && <Payments />}
             {section === "results" && <Results />}
+            {section === "courses" && <Courses />}
+            {section === "attendance" && <Attendance user={user} />}
             {section === "transport" && (
               <div className="ad-embed">
                 <React.Suspense fallback={<Skeleton rows={6} />}>
@@ -1139,5 +1148,220 @@ function Results() {
         ) : <Empty icon="chart" title="No results imported yet">Upload the first official result PDF above.</Empty>}
       </Card>
     </div>
+  );
+}
+
+// ---------- Attendance ----------
+// Teachers see only their department's courses and students (enforced by the API); admins see all.
+function Attendance({ user }) {
+  const { toast } = useConsole();
+  const courses = useResource("/api/attendance/courses");
+  const [courseId, setCourseId] = useState("");
+  const [date, setDate] = useState(todayIso);
+  const [filters, setFilters] = useState({ q: "", batch: "", section: "" });
+  const [roster, setRoster] = useState({ students: [], loading: false, error: "" });
+  const [marks, setMarks] = useState({});
+  const [saving, setSaving] = useState(false);
+  const activeCourse = courseId || courses.data?.[0]?.id || "";
+
+  const loadRoster = useCallback(async () => {
+    if (!activeCourse) return;
+    setRoster((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const params = new URLSearchParams({ courseId: activeCourse, date, ...filters });
+      const data = await request(`/api/attendance/roster?${params}`);
+      setRoster({ students: data.students, loading: false, error: "" });
+      setMarks(Object.fromEntries(data.students.filter((student) => student.status).map((student) => [student.id, student.status])));
+    } catch (error) {
+      setRoster({ students: [], loading: false, error: error.message });
+    }
+  }, [activeCourse, date, filters]);
+
+  useEffect(() => {
+    const timer = setTimeout(loadRoster, 300); // debounce typing in the search fields
+    return () => clearTimeout(timer);
+  }, [loadRoster]);
+
+  const saved = useMemo(() => Object.fromEntries(roster.students.map((student) => [student.id, student.status])), [roster.students]);
+  const changed = roster.students.filter((student) => marks[student.id] && marks[student.id] !== saved[student.id]);
+  const counts = Object.values(marks).reduce((acc, status) => ({ ...acc, [status]: (acc[status] || 0) + 1 }), {});
+  const setFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
+  const markAll = (status) => setMarks((current) => ({ ...current, ...Object.fromEntries(roster.students.map((student) => [student.id, status])) }));
+
+  async function save() {
+    setSaving(true);
+    try {
+      const records = changed.map((student) => ({ studentId: student.id, status: marks[student.id] }));
+      await request("/api/attendance", { method: "PUT", body: { courseId: activeCourse, date, records } });
+      setRoster((current) => ({ ...current, students: current.students.map((student) => (marks[student.id] ? { ...student, status: marks[student.id] } : student)) }));
+      toast(`Attendance saved for ${records.length} student${records.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (courses.error) return <ErrorNote message={courses.error} onRetry={courses.reload} />;
+  if (courses.loading && !courses.data) return <Skeleton rows={6} />;
+  if (!courses.data?.length) {
+    return <Empty icon="calendarCheck" title="No courses to take attendance for">{user.role === "TEACHER" ? `There are no courses for the ${user.department} department yet.` : "Add courses first."}</Empty>;
+  }
+
+  return (
+    <div className="ad-stack">
+      <Card
+        title="Take attendance"
+        subtitle={user.role === "TEACHER" ? `Students in ${user.department}` : "All departments"}
+        actions={<button type="button" className="ad-btn primary" onClick={save} disabled={saving || !changed.length}>{saving ? "Saving…" : `Save${changed.length ? ` (${changed.length})` : ""}`}</button>}
+      >
+        <div className="ad-toolbar">
+          <select value={activeCourse} onChange={(event) => setCourseId(event.target.value)} aria-label="Course">
+            {courses.data.map((course) => <option key={course.id} value={course.id}>{course.code} · {course.title}</option>)}
+          </select>
+          <input type="date" className="ad-input" value={date} max={todayIso()} onChange={(event) => event.target.value && setDate(event.target.value)} aria-label="Class date" />
+          <label className="ad-search"><Icon name="search" size={16} /><input value={filters.q} onChange={setFilter("q")} placeholder="Search name or student ID" /></label>
+          <input className="ad-input" value={filters.batch} onChange={setFilter("batch")} placeholder="Batch" aria-label="Batch" size={8} />
+          <input className="ad-input" value={filters.section} onChange={setFilter("section")} placeholder="Section" aria-label="Section" size={8} />
+        </div>
+        <div className="ad-toolbar">
+          <button type="button" className="ad-btn sm soft" onClick={() => markAll("PRESENT")} disabled={!roster.students.length}>Mark all present</button>
+          <button type="button" className="ad-btn sm ghost" onClick={() => markAll("ABSENT")} disabled={!roster.students.length}>Mark all absent</button>
+          <span className="ad-meta">{roster.students.length} students · {counts.PRESENT || 0} present · {counts.LATE || 0} late · {counts.ABSENT || 0} absent</span>
+        </div>
+        <ErrorNote message={roster.error} onRetry={loadRoster} />
+        {roster.loading && !roster.students.length ? <Skeleton /> : roster.students.length ? (
+          <div className="ad-table-wrap">
+            <table className="ad-table">
+              <thead><tr><th>Student</th><th>Batch · Section</th><th className="actions">Status</th></tr></thead>
+              <tbody>
+                {roster.students.map((student) => (
+                  <tr key={student.id}>
+                    <td>
+                      <div className="ad-person">
+                        <span className="ad-avatar sm">{initialsOf(student.name)}</span>
+                        <div><strong>{student.name}</strong><small>{student.studentId || "No student ID"}</small></div>
+                      </div>
+                    </td>
+                    <td><span className="ad-meta">{[student.batch && `Batch ${student.batch}`, student.section && `Sec ${student.section}`].filter(Boolean).join(" · ") || "—"}</span></td>
+                    <td className="actions">
+                      <div className="ad-att-choice" role="radiogroup" aria-label={`Attendance for ${student.name}`}>
+                        {Object.entries(ATTENDANCE_LABELS).map(([status, label]) => (
+                          <button
+                            key={status}
+                            type="button"
+                            role="radio"
+                            aria-checked={marks[student.id] === status}
+                            className={`ad-btn sm ${marks[student.id] === status ? (status === "ABSENT" ? "danger" : "primary") : "ghost"}`}
+                            onClick={() => setMarks((current) => ({ ...current, [student.id]: status }))}
+                          >{label}</button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty icon="users" title="No matching students">Try a different batch, section or search.</Empty>}
+      </Card>
+    </div>
+  );
+}
+
+// ---------- Courses ----------
+const EMPTY_COURSE = { code: "", title: "", department: "", credits: 3 };
+
+function Courses() {
+  const { toast } = useConsole();
+  const { data, error, loading, reload, setData } = useResource("/api/admin/courses");
+  const [department, setDepartment] = useState("");
+  const [editing, setEditing] = useState(null); // EMPTY_COURSE to add, a course to edit
+  const departments = useMemo(() => [...new Set((data || []).map((course) => course.department).filter(Boolean))].sort(), [data]);
+  const courses = (data || []).filter((course) => !department || course.department === department);
+
+  function saved(course, isNew) {
+    setData((list) => (isNew ? [...(list || []), course] : list.map((item) => (item.id === course.id ? course : item))));
+    setEditing(null);
+    toast(`${course.code} ${isNew ? "added" : "updated"}.`);
+  }
+
+  return (
+    <div className="ad-stack">
+      <div className="ad-chips">
+        {[["", "All", data?.length || 0], ...departments.map((key) => [key, key, (data || []).filter((course) => course.department === key).length])].map(([key, label, count]) => (
+          <button key={label} type="button" className={`ad-chip ${department === key ? "active" : ""}`} onClick={() => setDepartment(key)}>{label}<b>{count}</b></button>
+        ))}
+      </div>
+      <Card
+        title="Courses"
+        subtitle="Teachers take attendance for their department's courses"
+        actions={<button type="button" className="ad-btn primary" onClick={() => setEditing(EMPTY_COURSE)}><Icon name="plus" size={16} /> Add course</button>}
+      >
+        <ErrorNote message={error} onRetry={reload} />
+        {loading && !data ? <Skeleton /> : courses.length ? (
+          <div className="ad-table-wrap">
+            <table className="ad-table">
+              <thead><tr><th>Code</th><th>Title</th><th>Department</th><th className="num">Credits</th><th className="actions">Actions</th></tr></thead>
+              <tbody>
+                {courses.map((course) => (
+                  <tr key={course.id}>
+                    <td className="nowrap"><strong>{course.code}</strong></td>
+                    <td>{course.title}</td>
+                    <td><Badge>{course.department || "—"}</Badge></td>
+                    <td className="num">{course.credits}</td>
+                    <td className="actions"><button type="button" className="ad-icon-btn" title="Edit course" aria-label={`Edit ${course.code}`} onClick={() => setEditing(course)}><Icon name="edit" size={16} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty icon="book" title="No courses yet">Add a course so teachers can take attendance.</Empty>}
+      </Card>
+      {editing && <CourseModal course={editing} departments={departments} onClose={() => setEditing(null)} onSaved={saved} />}
+    </div>
+  );
+}
+
+function CourseModal({ course, departments, onClose, onSaved }) {
+  const isNew = !course.id;
+  const [form, setForm] = useState({ code: course.code, title: course.title, department: course.department || "", credits: course.credits });
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const result = await request(isNew ? "/api/admin/courses" : `/api/admin/courses/${course.id}`, { method: isNew ? "POST" : "PATCH", body: form });
+      onSaved(result, isNew);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  }
+  return (
+    <Modal
+      title={isNew ? "Add a course" : `Edit ${course.code}`}
+      onClose={onClose}
+      footer={(
+        <>
+          <button type="button" className="ad-btn ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" form="ad-course" className="ad-btn primary" disabled={saving}>{saving ? "Saving…" : isNew ? "Add course" : "Save changes"}</button>
+        </>
+      )}
+    >
+      <form id="ad-course" className="ad-form" onSubmit={submit}>
+        <Field label="Course code" hint="e.g. CSE401"><input value={form.code} onChange={set("code")} required maxLength={20} autoFocus /></Field>
+        <Field label="Department" hint="e.g. CSE, ENG, BBA">
+          <input value={form.department} onChange={set("department")} required maxLength={40} list="ad-course-departments" />
+          <datalist id="ad-course-departments">{departments.map((key) => <option key={key} value={key} />)}</datalist>
+        </Field>
+        <Field label="Title" wide><input value={form.title} onChange={set("title")} required maxLength={120} /></Field>
+        <Field label="Credits"><input type="number" min={0} max={6} step={1} value={form.credits} onChange={set("credits")} required /></Field>
+        {error && <div className="ad-alert ad-alert-error" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
+      </form>
+    </Modal>
   );
 }
