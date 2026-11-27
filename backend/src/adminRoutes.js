@@ -198,6 +198,7 @@ export function createAdminRouter({ db, auth, roles, supabaseAdmin }) {
       email: profile.email, password, email_confirm: true, user_metadata: { name: profile.name },
     });
     if (error || !data?.user) {
+      console.error('Supabase Auth createUser failed:', error?.status, error?.code, error?.message);
       const exists = /already|registered|exists/iu.test(error?.message || '');
       throw fail(exists ? 409 : 502, exists ? 'That email already has a sign-in in Supabase Auth.' : 'Supabase Auth could not create the sign-in.');
     }
