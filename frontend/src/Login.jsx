@@ -73,6 +73,8 @@ function ForgotPasswordForm({ initialEmail, onBack }) {
 export default function Login({ onLogin, message = "" }) {
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
+  // Admin sign-in: same Supabase login, but only accounts with the ADMIN role are let through.
+  const [isAdminMode, setIsAdminMode] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [studentId, setStudentId] = useState("");
@@ -163,7 +165,12 @@ export default function Login({ onLogin, message = "" }) {
           ? "Sign in failed: your session could not be verified. Please try again."
           : responseError || "The server could not load your profile. Please try again.");
       }
-      onLogin(await response.json());
+      const profile = await response.json();
+      if (isAdminMode && profile.role !== "ADMIN") {
+        await supabase.auth.signOut();
+        throw new Error("This account doesn't have administrator access. Use the student sign-in instead.");
+      }
+      onLogin(profile);
     } catch (requestError) {
       // Supabase wraps network failures as AuthRetryableFetchError ("Failed to fetch"); fetch itself throws TypeError.
       const isNetworkError = requestError instanceof TypeError
@@ -202,6 +209,15 @@ export default function Login({ onLogin, message = "" }) {
     setError("");
   };
 
+  const switchAdminMode = (admin) => {
+    setIsAdminMode(admin);
+    setIsRegistering(false);
+    setPassword("");
+    setConfirmPassword("");
+    setError("");
+    setNotice("");
+  };
+
   if (isForgotPassword) {
     return (
       <ForgotPasswordForm
@@ -219,12 +235,23 @@ export default function Login({ onLogin, message = "" }) {
 
   return (
     <AuthLayout
-      title={isRegistering ? "Create your account" : "Welcome back"}
-      subtitle={isRegistering
-        ? "Join the Smart University portal with your student details."
-        : "Sign in to continue to your student portal."}
+      title={isAdminMode ? "Admin sign in" : isRegistering ? "Create your account" : "Welcome back"}
+      subtitle={isAdminMode
+        ? "Sign in to the Admin Console to manage the university portal."
+        : isRegistering
+          ? "Join the Smart University portal with your student details."
+          : "Sign in to continue to your student portal."}
       footer={<span>Smart University Student Portal · Secure · Modern · Connected</span>}
     >
+      {isAdminMode ? (
+        <div className="auth-admin-badge">
+          <span><Icon name="shield" size={18} /></span>
+          <div>
+            <strong>Administrator access</strong>
+            <small>Only accounts with the admin role can sign in here.</small>
+          </div>
+        </div>
+      ) : (
       <div className="auth-tabs" role="tablist" aria-label="Account">
         <button type="button" role="tab" aria-selected={!isRegistering} className={!isRegistering ? "active" : ""} onClick={() => switchMode(false)}>
           Sign in
@@ -234,6 +261,7 @@ export default function Login({ onLogin, message = "" }) {
         </button>
         <span className="auth-tabs-indicator" style={{ transform: `translateX(${isRegistering ? 100 : 0}%)` }} aria-hidden="true" />
       </div>
+      )}
 
       <AuthAlert tone="info">{message}</AuthAlert>
       <AuthAlert tone="success">{notice}</AuthAlert>
@@ -249,7 +277,7 @@ export default function Login({ onLogin, message = "" }) {
         </button>
       )}
 
-      <form className="auth-form" onSubmit={handleSubmit} key={isRegistering ? "register" : "signin"}>
+      <form className="auth-form" onSubmit={handleSubmit} key={isAdminMode ? "admin" : isRegistering ? "register" : "signin"}>
         {isRegistering && (
           <TextField
             id="login-name"
@@ -271,7 +299,7 @@ export default function Login({ onLogin, message = "" }) {
           icon="mail"
           type="email"
           autoComplete="email"
-          placeholder="you@metrouni.edu.bd"
+          placeholder={isAdminMode ? "admin@metsol.edu" : "you@metrouni.edu.bd"}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           required
@@ -374,19 +402,39 @@ export default function Login({ onLogin, message = "" }) {
           </div>
         )}
 
-        <button type="submit" className="auth-submit" disabled={isSubmitting}>
+        <button type="submit" className={`auth-submit ${isAdminMode ? "admin" : ""}`} disabled={isSubmitting}>
           {isSubmitting && <span className="auth-spinner" />}
-          {isSubmitting ? (isRegistering ? "Creating account…" : "Signing in…") : (isRegistering ? "Create account" : "Sign in")}
+          {isSubmitting
+            ? (isRegistering ? "Creating account…" : "Signing in…")
+            : (isAdminMode ? "Sign in to Admin Console" : isRegistering ? "Create account" : "Sign in")}
           {!isSubmitting && <Icon name="arrowRight" size={17} />}
         </button>
       </form>
 
-      <p className="auth-switch">
-        {isRegistering ? "Already have an account?" : "New to the portal?"}{" "}
-        <button type="button" onClick={() => switchMode(!isRegistering)}>
-          {isRegistering ? "Sign in" : "Create an account"}
-        </button>
-      </p>
+      {isAdminMode ? (
+        <p className="auth-switch">
+          Not an administrator?{" "}
+          <button type="button" onClick={() => switchAdminMode(false)}>Back to student sign in</button>
+        </p>
+      ) : (
+        <>
+          <p className="auth-switch">
+            {isRegistering ? "Already have an account?" : "New to the portal?"}{" "}
+            <button type="button" onClick={() => switchMode(!isRegistering)}>
+              {isRegistering ? "Sign in" : "Create an account"}
+            </button>
+          </p>
+          {!isRegistering && (
+            <>
+              <div className="auth-divider"><span>or</span></div>
+              <button type="button" className="auth-alt-button" onClick={() => switchAdminMode(true)}>
+                <Icon name="shield" size={17} />
+                Sign in as administrator
+              </button>
+            </>
+          )}
+        </>
+      )}
     </AuthLayout>
   );
 }

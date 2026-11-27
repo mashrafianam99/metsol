@@ -9,6 +9,7 @@ import { getAuthenticatedStudentResultFilter } from './result-import/studentResu
 import { generateAssistantResponse } from './ai.js';
 import { AiDocumentError, extractAiDocument, MAX_AI_DOCUMENT_BYTES, MAX_AI_DOCUMENT_TEXT } from './aiDocuments.js';
 import { createTransportRouter } from './transportRoutes.js';
+import { createAdminRouter } from './adminRoutes.js';
 import { applyCheckoutSession, buildCheckoutParams, getStripe, StripeConfigError } from './stripePayments.js';
 import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, getStudentCourseworkForUser, GoogleReconnectRequiredError } from './googleClassroom.js';
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client'; import { createClient } from '@supabase/supabase-js';
@@ -252,6 +253,8 @@ app.use('/api',createTransportRouter({
   serviceRoleKey:process.env.SUPABASE_SERVICE_ROLE_KEY,
   createClient,
 }));
+const supabaseAdmin=process.env.SUPABASE_SERVICE_ROLE_KEY?createClient(supabaseUrl,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}}):null;
+app.use('/api',createAdminRouter({db,auth,roles,supabaseAdmin}));
 app.get('/api/dashboard',auth,async(req,res)=>{const [courses,notices,assignments,payments]=await Promise.all([db.courseEnrollment.count({where:{userId:req.user.id}}),db.notice.findMany({orderBy:{createdAt:'desc'},take:5}),db.assignment.findMany({take:5,orderBy:{dueAt:'asc'}}),db.payment.findMany({where:{studentId:req.user.id},orderBy:{createdAt:'desc'},take:5})]);res.json({courses,notices,assignments,payments})});
 app.get('/api/courses',auth,async(_,res)=>res.json(await db.course.findMany({include:{enrollments:true}})));
 app.post('/api/courses/:id/register',auth,roles('STUDENT'),async(req,res)=>{try{res.json(await db.courseEnrollment.create({data:{userId:req.user.id,courseId:req.params.id,semester:req.body.semester||'Fall 2026'}}))}catch{res.status(409).json({error:'Already registered or course not found'})}});

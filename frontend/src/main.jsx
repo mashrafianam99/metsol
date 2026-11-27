@@ -14,6 +14,7 @@ import "./theme.css";
 
 const GRADE_OPTIONS = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "D", "F", "I", "W", "S", "AB"];
 const Transport = React.lazy(() => import("./Transport.jsx"));
+const AdminPanel = React.lazy(() => import("./AdminPanel.jsx"));
 
 const calculateCourseSummary = (course = {}) => {
   const creditValue = Number(course.credit);
@@ -521,6 +522,8 @@ function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [user, setUser] = useState(null);
+  // Administrators land in the admin console; this switches them to the regular portal view.
+  const [portalView, setPortalView] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -594,6 +597,7 @@ function App() {
       setAuthMessage(error.message);
     }
     setUser(null);
+    setPortalView(false);
     setActive("Dashboard");
   }
 
@@ -628,6 +632,21 @@ function App() {
           setAuthMessage("");
         }}
       />
+    );
+  }
+
+  const isAdmin = user.role === "ADMIN";
+  if (isAdmin && !portalView) {
+    return (
+      <React.Suspense fallback={<div className="splash" role="status"><p>Loading admin console…</p></div>}>
+        <AdminPanel
+          user={user}
+          dark={dark}
+          onToggleTheme={() => setDark((value) => !value)}
+          onSignOut={handleLogout}
+          onOpenPortal={() => setPortalView(true)}
+        />
+      </React.Suspense>
     );
   }
 
@@ -691,6 +710,12 @@ function App() {
         </nav>
 
         <div className="sb-footer">
+          {isAdmin && (
+            <button type="button" className="sb-item" onClick={() => setPortalView(false)} data-tip="Admin console">
+              <Icon name="shield" size={18} />
+              <span>Admin console</span>
+            </button>
+          )}
           <button type="button" className="sb-item" onClick={handleLogout} data-tip="Sign out">
             <Icon name="logout" size={18} />
             <span>Sign out</span>

@@ -102,6 +102,19 @@ The Vite dev server proxies `/api` to `http://localhost:4000`, so leave `VITE_AP
 
 Sign up in the app with your email and confirm it. New accounts are students. To make someone a teacher or admin, change `role` on their row in the Supabase **Table Editor → User** table.
 
+### Admin console
+
+Administrators sign in on the normal login page and land in a dedicated **Admin Console**. It covers the overview dashboard, users and roles, notices, fees and invoices (single, bulk and monthly billing, plus manual payments), official result PDF imports and transport management. **Open student portal** switches to the student view.
+
+To create an admin who can sign in straight away, with no email verification (needs `SUPABASE_SERVICE_ROLE_KEY`):
+
+```bash
+cd backend
+npm run create-admin -- admin@example.edu "a-strong-password" "Display Name"
+```
+
+Running it again for the same email resets that admin's password. From the console, admins can also add accounts for any role, and those accounts skip email verification too.
+
 The seeded accounts (`admin@university.test`, `teacher@university.test`, `student@university.test`) are linked the first time someone signs up and confirms that email. Their old seed passwords don't work, because Supabase handles all passwords.
 
 ---

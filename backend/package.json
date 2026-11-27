@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "postinstall": "prisma generate",
-    "db:deploy": "prisma migrate deploy"
+    "db:deploy": "prisma migrate deploy",
+    "create-admin": "node --env-file=.env scripts/create-admin.js"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
