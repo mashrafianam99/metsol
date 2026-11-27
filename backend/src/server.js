@@ -14,7 +14,7 @@ import { createAdminRouter } from './adminRoutes.js';
 import { applyCheckoutSession, buildCheckoutParams, getStripe, StripeConfigError } from './stripePayments.js';
 import { encryptSecret, getConnectionStatusForUser, getGoogleClassroomAuthUrl, getGoogleOAuthClient, disconnectGoogleAccountForUser, getStudentCourseworkForUser, GoogleReconnectRequiredError } from './googleClassroom.js';
 import express from 'express'; import cors from 'cors'; import helmet from 'helmet'; import rateLimit from 'express-rate-limit'; import jwt from 'jsonwebtoken'; import multer from 'multer'; import { PrismaClient } from '@prisma/client'; import { createClient } from '@supabase/supabase-js';
-const app=express(), db=new PrismaClient(); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); const STRIPE_WEBHOOK_PATH='/api/payments/stripe/webhook', jsonBody=express.json({limit:'2mb'});
+const app=express(), db=new PrismaClient(); app.set('trust proxy',1); app.use(helmet()); app.use(cors({origin:process.env.FRONTEND_URL||'http://localhost:5173'})); const STRIPE_WEBHOOK_PATH='/api/payments/stripe/webhook', jsonBody=express.json({limit:'2mb'});
 // Stripe's webhook signature is checked against the raw body, so that one route must skip JSON parsing.
 app.use((req,res,next)=>req.path===STRIPE_WEBHOOK_PATH?next():jsonBody(req,res,next)); app.use(rateLimit({windowMs:15*60*1000,limit:300}));
 const supabaseUrl=process.env.SUPABASE_URL, supabaseAnonKey=process.env.SUPABASE_ANON_KEY;

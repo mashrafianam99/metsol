@@ -125,7 +125,7 @@ The seeded accounts (`admin@university.test`, `teacher@university.test`, `studen
 
 | Variable | Needed for | Notes |
 |---|---|---|
-| `DATABASE_URL` | Everything | Supabase transaction pooler (port 6543), with `?pgbouncer=true&connection_limit=1` added |
+| `DATABASE_URL` | Everything | Supabase transaction pooler (port 6543), with `?pgbouncer=true&connection_limit=5` added (1 makes parallel queries queue and time out) |
 | `DIRECT_URL` | Migrations | Supabase session pooler or direct connection (port 5432) |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Sign-in | Supabase → Project Settings → API |
 | `SUPABASE_SERVICE_ROLE_KEY` | Transport admins | Backend only. Needed to create transport admin accounts from the UI |
