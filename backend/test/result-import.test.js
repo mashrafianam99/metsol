@@ -70,6 +70,7 @@ test("counts F as attempted but excludes special-grade credits from GPA and earn
       attemptedCredits: 9,
       earnedCredits: 3,
       courseCount: 3,
+      gpaCredits: 6,
       semesterGpa: 2,
     }
   );

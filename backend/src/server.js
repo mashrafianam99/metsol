@@ -2,10 +2,11 @@ import 'dotenv/config';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createMonthlyInvoices } from './monthlyInvoices.js';
 import { basename } from 'node:path';
-import { calculateResultSummary, SPECIAL_GRADES } from '../../shared/grading.js';
+import { calculateResultSummary } from '../../shared/grading.js';
 import { extractPdfLines, isPdfBuffer, normalizeStudentId, ResultPdfError } from './result-import/pdfParser.js';
 import { parseResultLines } from './result-import/resultParser.js';
 import { getAuthenticatedStudentResultFilter } from './result-import/studentResultMatcher.js';
+import { buildCgpaSummary, compareTerms } from './result-import/cgpa.js';
 import { generateAssistantResponse } from './ai.js';
 import { AiDocumentError, extractAiDocument, MAX_AI_DOCUMENT_BYTES, MAX_AI_DOCUMENT_TEXT } from './aiDocuments.js';
 import { createTransportRouter } from './transportRoutes.js';
@@ -108,11 +109,6 @@ const parseResultUpload = async (req) => {
     fileHash: createHash('sha256').update(req.file.buffer).digest('hex'),
     fileName: basename(req.file.originalname).replace(/[^\w.() -]/gu, '_').slice(0, 180) || 'university-results.pdf',
   };
-};
-
-const calculateGpa = (records) => {
-  const gpa = calculateResultSummary(records).semesterGpa;
-  return gpa > 0 || records.some((record) => !SPECIAL_GRADES.has(record.grade)) ? gpa : null;
 };
 
 const uniqueProvidedValue = (records, field) => {
@@ -523,38 +519,13 @@ app.get('/api/results/official', auth, roles('STUDENT'), async (req, res) => {
     });
   }
 
-  const semesterGroups = new Map();
-  for (const record of records) {
-    const key = `${record.semester ?? ''}|${record.academicYear ?? ''}`;
-    const group = semesterGroups.get(key) ?? {
-      semester: record.semester,
-      academicYear: record.academicYear,
-      records: [],
-    };
-    group.records.push(record);
-    semesterGroups.set(key, group);
-  }
-
-  const semesterSummaries = [...semesterGroups.values()].map((group) => {
-    const providedGpa = uniqueProvidedValue(group.records, 'gpa');
-    const providedCgpa = uniqueProvidedValue(group.records, 'cgpa');
-    return {
-      semester: group.semester,
-      academicYear: group.academicYear,
-      gpa: providedGpa ?? (group.records.some((record) => record.gpa !== null) ? null : calculateGpa(group.records)),
-      cgpa: providedCgpa,
-    };
-  });
-  const providedGpa = uniqueProvidedValue(records, 'gpa');
-  const providedCgpa = uniqueProvidedValue(records, 'cgpa');
-  const summaryGpa = providedGpa ?? (
-    records.some((record) => record.gpa !== null) || semesterGroups.size > 1
-      ? null
-      : calculateGpa(records)
-  );
-  const summaryCgpa = providedCgpa ?? (
-    records.some((record) => record.cgpa !== null) ? null : calculateGpa(records)
-  );
+  records.sort(compareTerms); // stable: keeps course order within a term
+  // CGPA is the headline figure: the university's own CGPA when the PDF has one, otherwise
+  // calculated cumulatively over every term in chronological order.
+  const { semesters: semesterSummaries, cgpa: summaryCgpa, cgpaSource } = buildCgpaSummary(records);
+  const latestTerm = semesterSummaries.at(-1);
+  const summaryGpa = latestTerm?.gpa ?? null;
+  const providedLatestGpa = latestTerm ? uniqueProvidedValue(records.filter((record) => (record.semester ?? null) === latestTerm.semester && (record.academicYear ?? null) === latestTerm.academicYear), 'gpa') : null;
   const resultSummary = calculateResultSummary(records);
 
   return res.json({
@@ -575,12 +546,16 @@ app.get('/api/results/official', auth, roles('STUDENT'), async (req, res) => {
     })),
     semesters: semesterSummaries,
     summary: {
-      gpa: summaryGpa,
       cgpa: summaryCgpa,
-      gpaSource: summaryGpa === null ? null : providedGpa !== null ? 'university' : 'calculated',
-      cgpaSource: summaryCgpa === null ? null : providedCgpa !== null ? 'university' : 'calculated',
+      cgpaSource,
+      // gpa is the latest term's GPA, kept as a secondary figure.
+      gpa: summaryGpa,
+      gpaSource: summaryGpa === null ? null : providedLatestGpa !== null ? 'university' : 'calculated',
+      semesterCount: semesterSummaries.length,
       totalQualityPoints: resultSummary.totalQualityPoints,
       totalAttemptedCredits: resultSummary.attemptedCredits,
+      totalEarnedCredits: resultSummary.earnedCredits,
+      totalCgpaCredits: resultSummary.gpaCredits,
     },
     source: {
       label: 'Imported from university-provided result PDF',

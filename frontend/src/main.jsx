@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { calculateResultSummary, getGradeFromScore, getGradePointForGrade, isEarnedCredit, SPECIAL_GRADES } from "../../shared/grading.js";
+import { calculateCgpa, calculateResultSummary, getGradeFromScore, getGradePointForGrade, isEarnedCredit, SPECIAL_GRADES } from "../../shared/grading.js";
 import Login from "./Login.jsx";
 import ResetPassword, { isPasswordResetUrl } from "./ResetPassword.jsx";
 import { supabase } from "./supabase.js";
@@ -1490,6 +1490,9 @@ function Results({ user }) {
   });
   const [validationMessage, setValidationMessage] = useState("");
   const [calculatedSummary, setCalculatedSummary] = useState(null);
+  // The student's record before this semester; leave both blank for a first semester.
+  const [previousCgpa, setPreviousCgpa] = useState("");
+  const [previousCredits, setPreviousCredits] = useState("");
   const [officialResult, setOfficialResult] = useState(null);
   const [calculatorPrintMessage, setCalculatorPrintMessage] = useState("");
   const calculatorPrintRef = useRef(null);
@@ -1565,7 +1568,24 @@ function Results({ user }) {
   });
   const summary = calculatedSummary;
 
-  const calculateSemesterGpa = () => {
+  const calculateCgpaEstimate = () => {
+    const hasPreviousCgpa = previousCgpa !== "";
+    const hasPreviousCredits = previousCredits !== "";
+    const priorCgpa = Number(previousCgpa);
+    const priorCredits = Number(previousCredits);
+    if (hasPreviousCgpa !== hasPreviousCredits) {
+      setValidationMessage("Enter both your current CGPA and the credits you've completed, or leave both blank for your first semester.");
+      return;
+    }
+    if (hasPreviousCgpa && (!Number.isFinite(priorCgpa) || priorCgpa < 0 || priorCgpa > 4)) {
+      setValidationMessage("Your current CGPA must be between 0.00 and 4.00.");
+      return;
+    }
+    if (hasPreviousCredits && (!Number.isFinite(priorCredits) || priorCredits < 0 || priorCredits > 400)) {
+      setValidationMessage("Enter the credits you've completed so far (0 to 400).");
+      return;
+    }
+
     for (const [index, row] of courseRows.entries()) {
       if (!row.name.trim()) {
         setValidationMessage(`Enter a course name for subject ${index + 1}.`);
@@ -1584,12 +1604,27 @@ function Results({ user }) {
       }
     }
 
-    setCalculatedSummary(calculateCourseRowsSummary(courseRows));
+    const semester = calculateCourseRowsSummary(courseRows);
+    const priorCreditsValue = hasPreviousCredits ? priorCredits : 0;
+    setCalculatedSummary({
+      ...semester,
+      previousCgpa: hasPreviousCgpa ? priorCgpa : null,
+      previousCredits: priorCreditsValue,
+      totalCredits: priorCreditsValue + semester.gpaCredits,
+      cgpa: calculateCgpa({
+        previousCgpa: priorCgpa,
+        previousCredits: priorCreditsValue,
+        qualityPoints: semester.totalQualityPoints,
+        gpaCredits: semester.gpaCredits,
+      }),
+    });
     setValidationMessage("");
     setCalculatorPrintMessage("");
   };
 
   const resetCalculator = () => {
+    setPreviousCgpa("");
+    setPreviousCredits("");
     setCourseRows([{ id: Date.now(), name: "", credit: "", grade: "" }]);
     setCalculatedSummary(null);
     setValidationMessage("");
@@ -1597,10 +1632,12 @@ function Results({ user }) {
   };
 
   const printCalculatorResult = () => {
-    const fileName = getPrintFileName("GPA_Calculation", new Date().toISOString().slice(0, 10));
+    const fileName = getPrintFileName("CGPA_Estimate", new Date().toISOString().slice(0, 10));
     printResult(calculatorPrintRef.current, fileName, setCalculatorPrintMessage);
   };
   const displaySemesterGpa = summary ? Number(summary.semesterGpa).toFixed(2) : "—";
+  const displayCgpa = summary ? Number(summary.cgpa).toFixed(2) : "—";
+  const cgpaChange = summary && summary.previousCgpa !== null ? summary.cgpa - summary.previousCgpa : null;
   const calculatorPrintDate = new Date().toLocaleDateString();
 
   return (
@@ -1609,10 +1646,10 @@ function Results({ user }) {
         <div className="results-hero-copy">
           <span className="results-eyebrow">ACADEMIC RECORD</span>
           <h2>Academic Results</h2>
-          <p>Review available university results, calculate a semester GPA, and print or save a result as a PDF.</p>
+          <p>See your official CGPA, work out what your CGPA will be after this semester, and print or save a result as a PDF.</p>
           <nav className="results-section-nav" aria-label="Result sections">
             <a href="#official-result">Official result</a>
-            <a href="#gpa-calculator">GPA calculator</a>
+            <a href="#cgpa-calculator">CGPA calculator</a>
           </nav>
         </div>
         {user?.role === "STUDENT" && (
@@ -1631,19 +1668,19 @@ function Results({ user }) {
 
       <section className="results-overview" aria-label="Academic result overview">
         <article className="result-overview-card result-overview-primary">
-          <span>{officialResult?.summary?.gpaSource === "university" ? "University-reported GPA" : officialResult?.summary?.gpaSource === "calculated" ? "GPA from imported grades" : "Official GPA"}</span>
-          <strong>{officialResult?.found && officialResult.summary.gpa !== null ? Number(officialResult.summary.gpa).toFixed(2) : "—"}</strong>
-          <small>{officialResult?.found ? officialResult.summary.gpaSource === "university" ? "Reported in the university PDF" : officialResult.summary.gpaSource === "calculated" ? "Calculated from imported course grades" : "No unambiguous GPA is available in the imported result" : "Available when an official result is found"}</small>
+          <span>{officialResult?.summary?.cgpaSource === "university" ? "CGPA · reported by the university" : officialResult?.summary?.cgpaSource === "calculated" ? "CGPA · from your official grades" : "Official CGPA"}</span>
+          <strong>{officialResult?.found && officialResult.summary.cgpa !== null ? Number(officialResult.summary.cgpa).toFixed(2) : "—"}<em className="result-scale"> / 4.00</em></strong>
+          <small>{officialResult?.found ? officialResult.summary.cgpa === null ? "No CGPA could be worked out from the imported result" : `Across ${officialResult.summary.semesterCount} semester${officialResult.summary.semesterCount === 1 ? "" : "s"} and ${officialResult.records.length} courses` : "Available when an official result is found"}</small>
         </article>
         <article className="result-overview-card">
-          <span>{officialResult?.summary?.cgpaSource === "university" ? "University-reported CGPA" : officialResult?.summary?.cgpaSource === "calculated" ? "CGPA from imported grades" : "Official CGPA"}</span>
-          <strong>{officialResult?.found && officialResult.summary.cgpa !== null ? Number(officialResult.summary.cgpa).toFixed(2) : "—"}</strong>
-          <small>{officialResult?.found ? officialResult.summary.cgpaSource === "university" ? "Reported in the university PDF" : officialResult.summary.cgpaSource === "calculated" ? "Calculated from imported course grades" : "No unambiguous CGPA is available in the imported result" : "Not available until an official result is found"}</small>
+          <span>Credits completed</span>
+          <strong>{officialResult?.found ? Number(officialResult.summary.totalEarnedCredits ?? officialResult.summary.totalAttemptedCredits).toFixed(1) : "—"}</strong>
+          <small>{officialResult?.found ? `${Number(officialResult.summary.totalAttemptedCredits).toFixed(1)} credits attempted` : "Shown only when result data is available"}</small>
         </article>
         <article className="result-overview-card">
-          <span>Attempted credits</span>
-          <strong>{officialResult?.found ? Number(officialResult.summary.totalAttemptedCredits).toFixed(2) : "—"}</strong>
-          <small>{officialResult?.found ? `${officialResult.records.length} course records in the imported result` : "Shown only when result data is available"}</small>
+          <span>Semesters</span>
+          <strong>{officialResult?.found ? officialResult.summary.semesterCount : "—"}</strong>
+          <small>{officialResult?.found ? "Counted towards your CGPA" : "Shown only when result data is available"}</small>
         </article>
         <article className="result-overview-card">
           <span>Result status</span>
@@ -1654,18 +1691,47 @@ function Results({ user }) {
 
       <OfficialUniversityResult onOfficialResult={setOfficialResult} />
 
-      <section className="card calculator-card" id="gpa-calculator">
+      <section className="card calculator-card" id="cgpa-calculator">
         <div className="card-header result-calculator-header">
           <div>
             <span className="results-eyebrow">ESTIMATE</span>
-            <h3>Semester GPA Calculator</h3>
-            <span>Enter your course grades to estimate semester GPA using the Metropolitan University grading policy. This is not an official university result.</span>
+            <h3>CGPA Calculator</h3>
+            <span>Enter your current CGPA and this semester's courses to see what your CGPA will be, using the Metropolitan University grading policy. This is not an official university result.</span>
           </div>
         </div>
 
         <div className="calculator-grid">
           <div className="calculator-body">
-            <div className="calculator-table" role="table" aria-label="Semester GPA course inputs">
+            <div className="cgpa-previous">
+              <div className="cgpa-previous-head">
+                <strong>Your record so far</strong>
+                <span>Leave both blank if this is your first semester.</span>
+              </div>
+              <label>
+                <span>Current CGPA</span>
+                <input type="number" min="0" max="4" step="0.01" value={previousCgpa} onChange={(event) => { setPreviousCgpa(event.target.value); setCalculatedSummary(null); setValidationMessage(""); }} placeholder="e.g. 3.45" aria-label="Current CGPA" />
+              </label>
+              <label>
+                <span>Credits completed</span>
+                <input type="number" min="0" max="400" step="0.5" value={previousCredits} onChange={(event) => { setPreviousCredits(event.target.value); setCalculatedSummary(null); setValidationMessage(""); }} placeholder="e.g. 60" aria-label="Credits completed so far" />
+              </label>
+              {officialResult?.found && officialResult.summary.cgpa !== null && (
+                <button
+                  type="button"
+                  className="secondary-button cgpa-use-official"
+                  onClick={() => {
+                    setPreviousCgpa(Number(officialResult.summary.cgpa).toFixed(2));
+                    setPreviousCredits(String(Number(officialResult.summary.totalCgpaCredits ?? officialResult.summary.totalAttemptedCredits)));
+                    setCalculatedSummary(null);
+                  }}
+                >
+                  Use my official CGPA
+                </button>
+              )}
+            </div>
+
+            <h4 className="cgpa-courses-title">This semester's courses</h4>
+            <div className="calculator-table" role="table" aria-label="This semester's course inputs">
               <div className="calculator-table-head">
                 <span role="columnheader">Course Name</span>
                 <span role="columnheader">Credit Hours</span>
@@ -1723,26 +1789,37 @@ function Results({ user }) {
               <button type="button" className="secondary-button" onClick={addCourseRow}>+ Add subject</button>
               <div className="calc-btn-stack">
                 {summary && <button type="button" className="secondary-button" onClick={printCalculatorResult}>Print / Save estimate as PDF</button>}
-                <button type="button" className="primary-button" onClick={calculateSemesterGpa}>Calculate GPA</button>
+                <button type="button" className="primary-button" onClick={calculateCgpaEstimate}>Calculate CGPA</button>
                 <button type="button" className="secondary-button" onClick={resetCalculator}>Reset</button>
               </div>
             </div>
 
             <div className="summary-card" aria-live="polite">
-              <h4>Estimated semester GPA</h4>
+              <h4>Estimated CGPA</h4>
               {summary ? (
                 <>
                   <p className="calculator-result-notice">Estimate only — not an official university result.</p>
+                  <div className="cgpa-headline">
+                    <div>
+                      <span>Your CGPA after this semester</span>
+                      <strong>{displayCgpa}<em> / 4.00</em></strong>
+                    </div>
+                    {cgpaChange !== null && (
+                      <span className={`cgpa-change ${cgpaChange > 0.004 ? "up" : cgpaChange < -0.004 ? "down" : ""}`}>
+                        {cgpaChange > 0.004 ? "▲" : cgpaChange < -0.004 ? "▼" : "•"} {Math.abs(cgpaChange).toFixed(2)} from {Number(summary.previousCgpa).toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                   <div className="summary-grid">
-                    <div><span>Semester GPA</span><strong>{displaySemesterGpa}</strong></div>
-                    <div><span>Total quality points</span><strong>{Number(summary.totalQualityPoints).toFixed(2)}</strong></div>
-                    <div><span>Attempted credits</span><strong>{Number(summary.attemptedCredits).toFixed(2)}</strong></div>
-                    <div><span>Earned credits</span><strong>{Number(summary.earnedCredits).toFixed(2)}</strong></div>
+                    <div><span>This semester's GPA</span><strong>{displaySemesterGpa}</strong></div>
+                    <div><span>Total credits counted</span><strong>{Number(summary.totalCredits).toFixed(1)}</strong></div>
+                    <div><span>Semester credits</span><strong>{Number(summary.attemptedCredits).toFixed(1)}</strong></div>
+                    <div><span>Semester quality points</span><strong>{Number(summary.totalQualityPoints).toFixed(2)}</strong></div>
                     <div><span>Courses</span><strong>{summary.courseCount}</strong></div>
                   </div>
                 </>
               ) : (
-                <p className="calculator-empty-state">Add each course, credit value, and grade, then calculate to see your estimate.</p>
+                <p className="calculator-empty-state">Enter your current CGPA and credits, add this semester's courses, then calculate to see your new CGPA.</p>
               )}
             </div>
             {calculatorPrintMessage && <p className="result-action-message" role="status">{calculatorPrintMessage}</p>}
@@ -1750,7 +1827,7 @@ function Results({ user }) {
             <div className="calculator-print-sheet" ref={calculatorPrintRef} data-print-root>
               <header className="result-print-header">
                 <p>Metropolitan University · Smart University Portal</p>
-                <h1>Semester GPA Estimate</h1>
+                <h1>CGPA Estimate</h1>
                 <p>This is a student-generated estimate, not an official university result.</p>
               </header>
               {user?.role === "STUDENT" && (
@@ -1774,9 +1851,10 @@ function Results({ user }) {
                     ))}</tbody>
                   </table>
                   <div className="result-print-summary">
-                    <p><strong>Estimated semester GPA:</strong> {displaySemesterGpa}</p>
-                    <p><strong>Attempted credits:</strong> {Number(summary.attemptedCredits).toFixed(2)}</p>
-                    <p><strong>Earned credits:</strong> {Number(summary.earnedCredits).toFixed(2)}</p>
+                    <p><strong>Estimated CGPA:</strong> {displayCgpa}</p>
+                    {summary.previousCgpa !== null && <p><strong>Previous CGPA:</strong> {Number(summary.previousCgpa).toFixed(2)} over {Number(summary.previousCredits).toFixed(1)} credits</p>}
+                    <p><strong>This semester's GPA:</strong> {displaySemesterGpa}</p>
+                    <p><strong>Total credits counted:</strong> {Number(summary.totalCredits).toFixed(1)}</p>
                   </div>
                 </>
               )}
@@ -2125,20 +2203,26 @@ function OfficialUniversityResult({ onOfficialResult }) {
                 </tbody>
               </table>
               <div className="official-result-summary">
-                <div><span>{officialResult.summary.gpaSource === "university" ? "University-reported GPA" : officialResult.summary.gpaSource === "calculated" ? "GPA calculated from result" : "GPA not available"}</span><strong>{officialResult.summary.gpa === null ? "—" : Number(officialResult.summary.gpa).toFixed(2)}</strong></div>
-                <div><span>{officialResult.summary.cgpaSource === "university" ? "University-reported CGPA" : officialResult.summary.cgpaSource === "calculated" ? "CGPA calculated from result" : "CGPA not available"}</span><strong>{officialResult.summary.cgpa === null ? "—" : Number(officialResult.summary.cgpa).toFixed(2)}</strong></div>
+                <div className="official-cgpa"><span>{officialResult.summary.cgpaSource === "university" ? "CGPA (reported by the university)" : officialResult.summary.cgpaSource === "calculated" ? "CGPA (calculated from your grades)" : "CGPA not available"}</span><strong>{officialResult.summary.cgpa === null ? "—" : Number(officialResult.summary.cgpa).toFixed(2)}</strong></div>
+                <div><span>Credits Completed</span><strong>{Number(officialResult.summary.totalEarnedCredits ?? officialResult.summary.totalAttemptedCredits).toFixed(1)}</strong></div>
+                <div><span>Attempted Credits</span><strong>{Number(officialResult.summary.totalAttemptedCredits).toFixed(1)}</strong></div>
                 <div><span>Quality Points</span><strong>{Number(officialResult.summary.totalQualityPoints).toFixed(2)}</strong></div>
-                <div><span>Attempted Credits</span><strong>{Number(officialResult.summary.totalAttemptedCredits).toFixed(2)}</strong></div>
               </div>
-              {officialResult.semesters.length > 1 && (
+              {officialResult.semesters.length > 0 && (
                 <div className="official-semester-summaries">
-                  {officialResult.semesters.map((semester, index) => (
-                    <p key={`${semester.semester}-${semester.academicYear}-${index}`}>
-                      {[semester.semester, semester.academicYear].filter(Boolean).join(" · ") || `Term ${index + 1}`}:
-                      {" "}GPA {semester.gpa === null ? "—" : Number(semester.gpa).toFixed(2)}
-                      {semester.cgpa === null ? "" : ` · CGPA ${Number(semester.cgpa).toFixed(2)}`}
-                    </p>
-                  ))}
+                  <table className="cgpa-progress">
+                    <thead><tr><th>Semester</th><th>Credits</th><th>Term GPA</th><th>CGPA</th></tr></thead>
+                    <tbody>
+                      {officialResult.semesters.map((semester, index) => (
+                        <tr key={`${semester.semester}-${semester.academicYear}-${index}`}>
+                          <td>{[semester.semester, semester.academicYear].filter(Boolean).join(" · ") || `Term ${index + 1}`}</td>
+                          <td>{semester.credits === undefined ? "—" : Number(semester.credits).toFixed(1)}</td>
+                          <td>{semester.gpa === null ? "—" : Number(semester.gpa).toFixed(2)}</td>
+                          <td><strong>{semester.cgpa === null ? "—" : Number(semester.cgpa).toFixed(2)}</strong></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
               <p className="official-result-source">

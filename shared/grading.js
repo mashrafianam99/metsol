@@ -72,6 +72,16 @@ export const calculateResultSummary = (records) => {
     attemptedCredits,
     earnedCredits,
     courseCount: validRecords.length,
+    gpaCredits,
     semesterGpa: gpaCredits > 0 ? totalQualityPoints / gpaCredits : 0,
   };
+};
+
+// CGPA = all quality points earned so far / all credits that count towards GPA so far.
+// previousCgpa and previousCredits describe the record before the new courses (both optional).
+export const calculateCgpa = ({ previousCgpa = 0, previousCredits = 0, qualityPoints = 0, gpaCredits = 0 }) => {
+  const priorCredits = Number(previousCredits) > 0 ? Number(previousCredits) : 0;
+  const priorPoints = priorCredits * (Number(previousCgpa) || 0);
+  const totalCredits = priorCredits + Number(gpaCredits || 0);
+  return totalCredits > 0 ? (priorPoints + Number(qualityPoints || 0)) / totalCredits : 0;
 };
