@@ -1318,6 +1318,7 @@ function Courses() {
           </div>
         ) : <Empty icon="book" title="No courses yet">Add a course so teachers can take attendance.</Empty>}
       </Card>
+      <BatchAssignments courses={data || []} />
       {editing && <CourseModal course={editing} departments={departments} onClose={() => setEditing(null)} onSaved={saved} />}
     </div>
   );
@@ -1363,5 +1364,75 @@ function CourseModal({ course, departments, onClose, onSaved }) {
         {error && <div className="ad-alert ad-alert-error" role="alert"><Icon name="alert" size={16} /><span>{error}</span></div>}
       </form>
     </Modal>
+  );
+}
+
+// Assigning a course to a batch enrols every student of that batch in the course's department.
+function BatchAssignments({ courses }) {
+  const { toast, confirm } = useConsole();
+  const { data, error, loading, reload, setData } = useResource("/api/admin/course-batches");
+  const [code, setCode] = useState("");
+  const [batch, setBatch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const course = courses.find((item) => item.code.toLowerCase() === code.trim().replace(/\s+/g, "").toLowerCase());
+
+  async function assign(event) {
+    event.preventDefault();
+    if (!course) return toast(`No course with code ${code.trim() || "…"}. Add it above first.`, "error");
+    setSaving(true);
+    try {
+      const row = await request("/api/admin/course-batches", { method: "POST", body: { courseId: course.id, batch } });
+      setData((list) => [...(list || []), row]);
+      toast(`${row.course.code} assigned to batch ${row.batch} · ${row.studentCount} student${row.studentCount === 1 ? "" : "s"}.`);
+      setCode("");
+      setBatch("");
+    } catch (err) {
+      toast(err.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(row) {
+    const ok = await confirm({ title: "Remove from batch?", message: `${row.course.code} will disappear from the courses of batch ${row.batch}'s students.`, confirmLabel: "Remove", danger: true });
+    if (!ok) return;
+    try {
+      await request(`/api/admin/course-batches/${row.id}`, { method: "DELETE" });
+      setData((list) => list.filter((item) => item.id !== row.id));
+      toast(`${row.course.code} removed from batch ${row.batch}.`);
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  }
+
+  return (
+    <Card title="Assign courses to batches" subtitle="Students of that batch (in the course's department) see the course on their dashboard">
+      <form className="ad-toolbar" onSubmit={assign}>
+        <input className="ad-input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="Course code, e.g. CSE390" aria-label="Course code" list="ad-batch-courses" required />
+        <datalist id="ad-batch-courses">{courses.map((item) => <option key={item.id} value={item.code}>{item.title}</option>)}</datalist>
+        <input className="ad-input" value={batch} onChange={(event) => setBatch(event.target.value)} placeholder="Batch, e.g. 60" aria-label="Batch" size={10} required />
+        <button type="submit" className="ad-btn primary" disabled={saving}>{saving ? "Assigning…" : "Assign"}</button>
+        <span className="ad-meta">{code.trim() ? (course ? `${course.title} · ${course.department || "all departments"}` : "Unknown course code") : ""}</span>
+      </form>
+      <ErrorNote message={error} onRetry={reload} />
+      {loading && !data ? <Skeleton rows={2} /> : data?.length ? (
+        <div className="ad-table-wrap">
+          <table className="ad-table">
+            <thead><tr><th>Batch</th><th>Course</th><th>Department</th><th className="num">Students</th><th className="actions">Actions</th></tr></thead>
+            <tbody>
+              {data.map((row) => (
+                <tr key={row.id}>
+                  <td className="nowrap"><strong>Batch {row.batch}</strong></td>
+                  <td><strong>{row.course.code}</strong><small>{row.course.title}</small></td>
+                  <td><Badge>{row.course.department || "—"}</Badge></td>
+                  <td className="num">{row.studentCount}</td>
+                  <td className="actions"><button type="button" className="ad-btn sm ghost" onClick={() => remove(row)}>Remove</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <Empty icon="users" title="No batch assignments yet">Enter a course code and a batch above.</Empty>}
+    </Card>
   );
 }

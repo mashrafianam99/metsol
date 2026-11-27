@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeCourse } from '../src/courseRoutes.js';
+import { normalizeBatchAssignment, normalizeCourse } from '../src/courseRoutes.js';
+
+test('assigning a course to a batch needs a course and a batch; the batch is trimmed', () => {
+  assert.deepEqual(normalizeBatchAssignment({ courseId: ' c1 ', batch: ' 60 ' }).value, { courseId: 'c1', batch: '60' });
+  assert.match(normalizeBatchAssignment({ batch: '60' }).error, /course/);
+  assert.match(normalizeBatchAssignment({ courseId: 'c1', batch: '  ' }).error, /batch/);
+  assert.match(normalizeBatchAssignment({ courseId: 'c1', batch: 'x'.repeat(41) }).error, /batch/);
+});
 
 test('courses need a code, title and department; code and department are upper-cased', () => {
   const ok = normalizeCourse({ code: ' cse 401 ', title: ' Compiler Design ', department: ' cse ', credits: '3' });

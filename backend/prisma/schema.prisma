@@ -164,6 +164,17 @@ model CourseAttendance {
   @@index([courseId])
 }
 
+// A course assigned to a batch: every student in that batch (and the course's department) is enrolled.
+model CourseBatch {
+  id        String   @id @default(cuid())
+  courseId  String
+  batch     String
+  createdAt DateTime @default(now())
+
+  @@unique([courseId, batch])
+  @@index([batch])
+}
+
 model Notice {
   id                 String   @id @default(cuid())
   title              String

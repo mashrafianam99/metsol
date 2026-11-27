@@ -29,6 +29,20 @@ export function normalizeCourse(body, { partial = false } = {}) {
   return { value };
 }
 
+export function normalizeBatchAssignment(body) {
+  const courseId = text(body?.courseId);
+  const batch = text(body?.batch);
+  if (!courseId) return { error: 'Choose a course.' };
+  if (!batch || batch.length > 40) return { error: 'Enter the batch (e.g. 60).' };
+  return { value: { courseId, batch } };
+}
+
+const insensitive = (value) => ({ equals: value, mode: 'insensitive' });
+// Students enrolled through a batch assignment: same batch and same department as the course.
+const batchStudentsWhere = (course, batch) => ({
+  role: 'STUDENT', isActive: true, batch: insensitive(batch), ...(course.department ? { department: insensitive(course.department) } : {}),
+});
+
 export function createCourseRouter({ db, auth, roles }) {
   const router = express.Router();
   const admin = [auth, roles('ADMIN')];
@@ -68,6 +82,47 @@ export function createCourseRouter({ db, auth, roles }) {
       if (error?.code === 'P2025') throw fail(404, 'Course not found.');
       throw error;
     }
+  }));
+
+  // ---------- Batch assignments ----------
+  router.get('/admin/course-batches', ...admin, wrap(async (_req, res) => {
+    const rows = await db.courseBatch.findMany({ orderBy: [{ batch: 'asc' }, { createdAt: 'asc' }] });
+    const courses = await db.course.findMany({ where: { id: { in: [...new Set(rows.map((row) => row.courseId))] } }, select: courseSelect });
+    const byId = new Map(courses.map((course) => [course.id, course]));
+    const withCounts = await Promise.all(rows.filter((row) => byId.has(row.courseId)).map(async (row) => {
+      const course = byId.get(row.courseId);
+      return { id: row.id, batch: row.batch, createdAt: row.createdAt, course, studentCount: await db.user.count({ where: batchStudentsWhere(course, row.batch) }) };
+    }));
+    res.json(withCounts);
+  }));
+
+  router.post('/admin/course-batches', ...admin, wrap(async (req, res) => {
+    const parsed = normalizeBatchAssignment(req.body);
+    if (parsed.error) throw fail(400, parsed.error);
+    const course = await db.course.findUnique({ where: { id: parsed.value.courseId }, select: courseSelect });
+    if (!course) throw fail(404, 'Course not found.');
+    const existing = await db.courseBatch.findFirst({ where: { courseId: course.id, batch: insensitive(parsed.value.batch) }, select: { id: true } });
+    if (existing) throw fail(409, `${course.code} is already assigned to batch ${parsed.value.batch}.`);
+    const row = await db.courseBatch.create({ data: { courseId: course.id, batch: parsed.value.batch } });
+    res.status(201).json({ id: row.id, batch: row.batch, createdAt: row.createdAt, course, studentCount: await db.user.count({ where: batchStudentsWhere(course, row.batch) }) });
+  }));
+
+  router.delete('/admin/course-batches/:id', ...admin, wrap(async (req, res) => {
+    const { count } = await db.courseBatch.deleteMany({ where: { id: req.params.id } });
+    if (!count) throw fail(404, 'Assignment not found.');
+    res.status(204).end();
+  }));
+
+  // The signed-in student's courses: every course assigned to their batch in their department.
+  router.get('/my/courses', auth, wrap(async (req, res) => {
+    const { role, batch, department } = req.user;
+    if (role !== 'STUDENT' || !batch) return res.json([]);
+    const rows = await db.courseBatch.findMany({ where: { batch: insensitive(batch) }, select: { courseId: true } });
+    res.json(await db.course.findMany({
+      where: { id: { in: rows.map((row) => row.courseId) }, ...(department ? { OR: [{ department: insensitive(department) }, { department: null }] } : {}) },
+      select: courseSelect,
+      orderBy: { code: 'asc' },
+    }));
   }));
 
   return router;

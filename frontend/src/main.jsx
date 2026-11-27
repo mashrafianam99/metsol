@@ -776,7 +776,7 @@ function App() {
 
         <div className="page-view" key={active}>
           {active === "Dashboard" && <Dashboard setActive={navigate} user={user} />}
-          {active === "Courses" && <Courses />}
+          {active === "Courses" && <Courses user={user} />}
           {active === "Teachers" && <Teachers />}
           {active === "Assignments" && <Assignments user={user} />}
           {active === "Google Classroom" && <GoogleClassroom />}
@@ -822,6 +822,9 @@ function Dashboard({ setActive, user }) {
   const [due, setDue] = useState({ total: 0, count: 0, state: "loading" });
   const isStudent = user?.role === "STUDENT";
   const attendance = useMyAttendance(isStudent);
+  const myCourses = useMyCourses(isStudent);
+  const enrolled = myCourses.courses || [];
+  const percentFor = new Map((attendance.courses || []).map((row) => [row.courseId, row.percent]));
   // Overall attendance: the average of the percentages teachers set for each course.
   const graded = attendance.courses || [];
   const attendancePercent = graded.length ? Math.round(graded.reduce((sum, course) => sum + course.percent, 0) / graded.length) : 0;
@@ -884,7 +887,7 @@ function Dashboard({ setActive, user }) {
       </section>
 
       <section className="stats-grid">
-        <Stat icon="book" tone="indigo" title="Enrolled Courses" value={6} hint="This semester" />
+        {isStudent && <Stat icon="book" tone="indigo" title="Enrolled Courses" value={enrolled.length} hint={myCourses.error ? "Couldn't load courses" : !myCourses.courses ? "Loading…" : user.batch ? `Batch ${user.batch}` : "No batch on your account"} />}
         <Stat icon="clipboard" tone="amber" title="Assignments" value={8} hint="2 due this week" />
         {isStudent && <Stat icon="calendarCheck" tone={graded.length && attendancePercent < 75 ? "red" : "green"} title="Attendance" value={attendancePercent} suffix="%" hint={attendanceHint} meter={attendancePercent} />}
         <Stat icon="wallet" tone={due.total ? "red" : "green"} title="Due Payment" value={due.total} prefix="৳" hint={dueHint} />
@@ -903,21 +906,26 @@ function Dashboard({ setActive, user }) {
           </div>
 
           <div className="course-list">
-            {courses.slice(0, 3).map((course) => (
-              <div className="course-row" key={course.code}>
-                <div className="course-icon"><Icon name="book" size={18} /></div>
-                <div className="course-info">
-                  <strong>{course.code}</strong>
-                  <span>{course.title}</span>
-                </div>
-                <div className="progress-box">
-                  <span>{course.progress}%</span>
-                  <div className="progress">
-                    <div style={{ width: `${course.progress}%` }} />
+            {!isStudent && <p>Students see the courses assigned to their batch here.</p>}
+            {isStudent && myCourses.courses && !enrolled.length && <p>{myCourses.error || "No courses assigned to your batch yet."}</p>}
+            {enrolled.slice(0, 3).map((course) => {
+              const percent = percentFor.get(course.id);
+              return (
+                <div className="course-row" key={course.id}>
+                  <div className="course-icon"><Icon name="book" size={18} /></div>
+                  <div className="course-info">
+                    <strong>{course.code}</strong>
+                    <span>{course.title}</span>
+                  </div>
+                  <div className="progress-box" title="Attendance">
+                    <span>{percent === undefined ? "—" : `${percent}%`}</span>
+                    <div className="progress">
+                      <div style={{ width: `${percent ?? 0}%` }} />
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -1035,38 +1043,48 @@ function Stat({ icon, tone = "indigo", title, value, prefix = "", suffix = "", h
   );
 }
 
-function Courses() {
+function Courses({ user }) {
+  const isStudent = user?.role === "STUDENT";
+  const mine = useMyCourses(isStudent);
+  const attendance = useMyAttendance(isStudent);
+  const percentFor = new Map((attendance.courses || []).map((row) => [row.courseId, row.percent]));
+
   return (
     <div>
       <div className="page-intro">
         <h2>My Courses</h2>
-        <p>Your enrolled courses for the current semester.</p>
+        <p>{isStudent ? `Courses assigned to your batch${user.batch ? ` (Batch ${user.batch})` : ""} by the university.` : "Students see the courses assigned to their batch here. Assign courses in the Admin console → Courses."}</p>
       </div>
 
+      {isStudent && mine.error && <p role="alert">{mine.error}</p>}
+      {isStudent && !mine.courses && <p>Loading your courses…</p>}
+      {isStudent && mine.courses?.length === 0 && !mine.error && <p>{user.batch ? "No courses have been assigned to your batch yet." : "Your account has no batch yet, so no courses can be assigned. Contact the university office."}</p>}
+
       <div className="course-grid">
-        {courses.map((course) => (
-          <div className="course-card" key={course.code}>
-            <div className="course-card-top">
-              <span>{course.code}</span>
-              <b>{course.credits} Credits</b>
-            </div>
-
-            <h3>{course.title}</h3>
-            <p>{course.teacher}</p>
-
-            <div className="course-progress">
-              <div>
-                <span>Course Progress</span>
-                <strong>{course.progress}%</strong>
+        {(mine.courses || []).map((course) => {
+          const percent = percentFor.get(course.id);
+          return (
+            <div className="course-card" key={course.id}>
+              <div className="course-card-top">
+                <span>{course.code}</span>
+                <b>{course.credits} Credits</b>
               </div>
-              <div className="progress">
-                <div style={{ width: `${course.progress}%` }} />
+
+              <h3>{course.title}</h3>
+              <p>{course.department || "All departments"}</p>
+
+              <div className="course-progress">
+                <div>
+                  <span>Attendance</span>
+                  <strong>{percent === undefined ? "Not set" : `${percent}%`}</strong>
+                </div>
+                <div className="progress">
+                  <div style={{ width: `${percent ?? 0}%` }} />
+                </div>
               </div>
             </div>
-
-            <button className="outline-button">Open Course</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1465,23 +1483,26 @@ function Assignments({ user }) {
 
 const attendanceLabel = (percent) => (percent >= 90 ? "Excellent" : percent >= 75 ? "Good" : "Below 75% minimum");
 
-// The signed-in student's per-course attendance; skipped for staff, who have none.
-function useMyAttendance(enabled) {
+// A list belonging to the signed-in student; skipped for staff, who have none.
+function useStudentList(path, enabled, failure) {
   const [state, setState] = useState({ courses: null, error: "" });
   useEffect(() => {
     if (!enabled) return undefined;
     let active = true;
-    apiFetch("/api/attendance/me")
+    apiFetch(path)
       .then(async (response) => {
         const data = await readJson(response);
-        if (!response.ok) throw new Error(data.error || "Could not load your attendance.");
+        if (!response.ok) throw new Error(data.error || failure);
         if (active) setState({ courses: data, error: "" });
       })
       .catch((error) => active && setState({ courses: [], error: error.message }));
     return () => { active = false; };
-  }, [enabled]);
+  }, [path, enabled, failure]);
   return state;
 }
+const useMyAttendance = (enabled) => useStudentList("/api/attendance/me", enabled, "Could not load your attendance.");
+// Courses come from the batches an admin assigned them to (Admin console → Courses).
+const useMyCourses = (enabled) => useStudentList("/api/my/courses", enabled, "Could not load your courses.");
 
 function Attendance({ user }) {
   const isStudent = user?.role === "STUDENT";
