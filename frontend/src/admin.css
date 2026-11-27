@@ -367,6 +367,6 @@ button.ad-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md);
   .ad-hero h2 { font-size: 23px; }
 }
 
-/* Attendance: Present / Late / Absent buttons per student */
-.ad-att-choice { display: inline-flex; gap: 6px; }
-.ad-att-choice .ad-btn.sm { min-width: 72px; justify-content: center; }
+/* Attendance: one percentage box per student */
+.ad-table .ad-att-percent { width: 84px; height: 36px; padding: 0 10px; text-align: right; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; }
+.ad-att-percent.invalid { border-color: var(--danger); }

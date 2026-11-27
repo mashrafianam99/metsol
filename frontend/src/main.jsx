@@ -781,7 +781,7 @@ function App() {
           {active === "Assignments" && <Assignments user={user} />}
           {active === "Google Classroom" && <GoogleClassroom />}
           {active === "Payments" && <Payments user={user} />}
-          {active === "Attendance" && <Attendance />}
+          {active === "Attendance" && <Attendance user={user} />}
           {active === "Results" && <Results key={user.role} user={user} />}
           {active === "Notices" && <Notices />}
           {active === "Bus Tracking" && <React.Suspense fallback={<div className="transport-empty">Loading transport…</div>}><Transport user={user} /></React.Suspense>}
@@ -820,6 +820,15 @@ function Dashboard({ setActive, user }) {
   const today = now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const [noticeError, setNoticeError] = useState("");
   const [due, setDue] = useState({ total: 0, count: 0, state: "loading" });
+  const isStudent = user?.role === "STUDENT";
+  const attendance = useMyAttendance(isStudent);
+  // Overall attendance: the average of the percentages teachers set for each course.
+  const graded = attendance.courses || [];
+  const attendancePercent = graded.length ? Math.round(graded.reduce((sum, course) => sum + course.percent, 0) / graded.length) : 0;
+  const attendanceHint = attendance.error ? "Couldn't load attendance"
+    : !attendance.courses ? "Loading…"
+    : !graded.length ? "Not set by teachers yet"
+    : `${attendancePercent >= 75 ? "Above" : "Below"} 75% minimum · ${graded.length} course${graded.length === 1 ? "" : "s"}`;
 
   // Real outstanding fees: the sum of unpaid invoices (admins see the total across all students).
   useEffect(() => {
@@ -877,7 +886,7 @@ function Dashboard({ setActive, user }) {
       <section className="stats-grid">
         <Stat icon="book" tone="indigo" title="Enrolled Courses" value={6} hint="This semester" />
         <Stat icon="clipboard" tone="amber" title="Assignments" value={8} hint="2 due this week" />
-        <Stat icon="calendarCheck" tone="green" title="Attendance" value={87} suffix="%" hint="Above 75% minimum" meter={87} />
+        {isStudent && <Stat icon="calendarCheck" tone={graded.length && attendancePercent < 75 ? "red" : "green"} title="Attendance" value={attendancePercent} suffix="%" hint={attendanceHint} meter={attendancePercent} />}
         <Stat icon="wallet" tone={due.total ? "red" : "green"} title="Due Payment" value={due.total} prefix="৳" hint={dueHint} />
       </section>
 
@@ -1456,9 +1465,11 @@ function Assignments({ user }) {
 
 const attendanceLabel = (percent) => (percent >= 90 ? "Excellent" : percent >= 75 ? "Good" : "Below 75% minimum");
 
-function Attendance() {
+// The signed-in student's per-course attendance; skipped for staff, who have none.
+function useMyAttendance(enabled) {
   const [state, setState] = useState({ courses: null, error: "" });
   useEffect(() => {
+    if (!enabled) return undefined;
     let active = true;
     apiFetch("/api/attendance/me")
       .then(async (response) => {
@@ -1468,14 +1479,34 @@ function Attendance() {
       })
       .catch((error) => active && setState({ courses: [], error: error.message }));
     return () => { active = false; };
-  }, []);
+  }, [enabled]);
+  return state;
+}
+
+function Attendance({ user }) {
+  const isStudent = user?.role === "STUDENT";
+  const state = useMyAttendance(isStudent);
+
+  if (!isStudent) {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <h3>Attendance</h3>
+            <span>This page shows a student's own attendance.</span>
+          </div>
+        </div>
+        <p>{user?.role === "TEACHER" ? "Teachers" : "Staff"} take attendance in the console: use “{user?.role === "TEACHER" ? "Teacher" : "Admin"} console” in the sidebar, then Attendance.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="card">
       <div className="card-header">
         <div>
           <h3>Attendance</h3>
-          <span>Recorded by your teachers · late counts as attended</span>
+          <span>Official attendance set by your teachers</span>
         </div>
       </div>
 
@@ -1486,7 +1517,7 @@ function Attendance() {
         <div className="attendance-row" key={course.courseId}>
           <div>
             <strong>{course.code} · {course.title}</strong>
-            <span>{attendanceLabel(course.percent)} · {course.present + course.late} of {course.total} classes{course.late ? ` (${course.late} late)` : ""}</span>
+            <span>{attendanceLabel(course.percent)} · updated {new Date(course.updatedAt).toLocaleDateString()}</span>
           </div>
 
           <div className="attendance-progress">

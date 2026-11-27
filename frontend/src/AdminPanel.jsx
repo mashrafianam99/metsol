@@ -16,8 +16,6 @@ const SECTIONS = [
   { id: "transport", label: "Transport", icon: "bus", group: "Campus" },
 ];
 const sectionsFor = (role) => SECTIONS.filter((section) => role === "ADMIN" || (role === "TEACHER" && section.teachers));
-const ATTENDANCE_LABELS = { PRESENT: "Present", LATE: "Late", ABSENT: "Absent" };
-const todayIso = () => new Date().toLocaleDateString("en-CA"); // local YYYY-MM-DD
 const ROLE_LABELS = { STUDENT: "Student", TEACHER: "Teacher", ADMIN: "Administrator", TRANSPORT_ADMIN: "Transport admin" };
 const CATEGORY_LABELS = { GENERAL: "General", ACADEMIC: "Academic", EXAM: "Exam", EVENT: "Event", URGENT: "Urgent", TRANSPORT: "Transport" };
 const AUDIENCE_LABELS = { ALL: "Everyone", STUDENT: "Students", TEACHER: "Teachers" };
@@ -1152,15 +1150,18 @@ function Results() {
 }
 
 // ---------- Attendance ----------
-// Teachers see only their department's courses and students (enforced by the API); admins see all.
+// Teachers set each student's official attendance % for a course. They only see their own
+// department's courses and students (enforced by the API); admins see all departments.
+const parsePercent = (value) => (/^\d{1,3}$/.test(String(value).trim()) && Number(value) <= 100 ? Number(value) : null);
+
 function Attendance({ user }) {
   const { toast } = useConsole();
   const courses = useResource("/api/attendance/courses");
   const [courseId, setCourseId] = useState("");
-  const [date, setDate] = useState(todayIso);
   const [filters, setFilters] = useState({ q: "", batch: "", section: "" });
   const [roster, setRoster] = useState({ students: [], loading: false, error: "" });
-  const [marks, setMarks] = useState({});
+  const [drafts, setDrafts] = useState({}); // studentId -> text typed in the % box
+  const [fillAll, setFillAll] = useState("");
   const [saving, setSaving] = useState(false);
   const activeCourse = courseId || courses.data?.[0]?.id || "";
 
@@ -1168,32 +1169,31 @@ function Attendance({ user }) {
     if (!activeCourse) return;
     setRoster((current) => ({ ...current, loading: true, error: "" }));
     try {
-      const params = new URLSearchParams({ courseId: activeCourse, date, ...filters });
-      const data = await request(`/api/attendance/roster?${params}`);
+      const data = await request(`/api/attendance/roster?${new URLSearchParams({ courseId: activeCourse, ...filters })}`);
       setRoster({ students: data.students, loading: false, error: "" });
-      setMarks(Object.fromEntries(data.students.filter((student) => student.status).map((student) => [student.id, student.status])));
+      setDrafts(Object.fromEntries(data.students.map((student) => [student.id, student.percent ?? ""])));
     } catch (error) {
       setRoster({ students: [], loading: false, error: error.message });
     }
-  }, [activeCourse, date, filters]);
+  }, [activeCourse, filters]);
 
   useEffect(() => {
     const timer = setTimeout(loadRoster, 300); // debounce typing in the search fields
     return () => clearTimeout(timer);
   }, [loadRoster]);
 
-  const saved = useMemo(() => Object.fromEntries(roster.students.map((student) => [student.id, student.status])), [roster.students]);
-  const changed = roster.students.filter((student) => marks[student.id] && marks[student.id] !== saved[student.id]);
-  const counts = Object.values(marks).reduce((acc, status) => ({ ...acc, [status]: (acc[status] || 0) + 1 }), {});
+  const edited = roster.students.filter((student) => String(drafts[student.id] ?? "") !== String(student.percent ?? ""));
+  const invalid = edited.filter((student) => parsePercent(drafts[student.id]) === null);
   const setFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
-  const markAll = (status) => setMarks((current) => ({ ...current, ...Object.fromEntries(roster.students.map((student) => [student.id, status])) }));
+  const applyToAll = () => parsePercent(fillAll) !== null && setDrafts(Object.fromEntries(roster.students.map((student) => [student.id, String(parsePercent(fillAll))])));
 
   async function save() {
     setSaving(true);
     try {
-      const records = changed.map((student) => ({ studentId: student.id, status: marks[student.id] }));
-      await request("/api/attendance", { method: "PUT", body: { courseId: activeCourse, date, records } });
-      setRoster((current) => ({ ...current, students: current.students.map((student) => (marks[student.id] ? { ...student, status: marks[student.id] } : student)) }));
+      const records = edited.map((student) => ({ studentId: student.id, percent: parsePercent(drafts[student.id]) }));
+      await request("/api/attendance", { method: "PUT", body: { courseId: activeCourse, records } });
+      const saved = new Map(records.map((record) => [record.studentId, record.percent]));
+      setRoster((current) => ({ ...current, students: current.students.map((student) => (saved.has(student.id) ? { ...student, percent: saved.get(student.id), updatedAt: new Date().toISOString() } : student)) }));
       toast(`Attendance saved for ${records.length} student${records.length === 1 ? "" : "s"}.`);
     } catch (error) {
       toast(error.message, "error");
@@ -1205,61 +1205,61 @@ function Attendance({ user }) {
   if (courses.error) return <ErrorNote message={courses.error} onRetry={courses.reload} />;
   if (courses.loading && !courses.data) return <Skeleton rows={6} />;
   if (!courses.data?.length) {
-    return <Empty icon="calendarCheck" title="No courses to take attendance for">{user.role === "TEACHER" ? `There are no courses for the ${user.department} department yet.` : "Add courses first."}</Empty>;
+    return <Empty icon="calendarCheck" title="No courses to set attendance for">{user.role === "TEACHER" ? `There are no courses for the ${user.department} department yet.` : "Add courses first."}</Empty>;
   }
 
   return (
     <div className="ad-stack">
       <Card
-        title="Take attendance"
-        subtitle={user.role === "TEACHER" ? `Students in ${user.department}` : "All departments"}
-        actions={<button type="button" className="ad-btn primary" onClick={save} disabled={saving || !changed.length}>{saving ? "Saving…" : `Save${changed.length ? ` (${changed.length})` : ""}`}</button>}
+        title="Course attendance"
+        subtitle={`${user.role === "TEACHER" ? `Students in ${user.department}` : "All departments"} · enter each student's attendance % for the course`}
+        actions={<button type="button" className="ad-btn primary" onClick={save} disabled={saving || !edited.length || invalid.length > 0}>{saving ? "Saving…" : `Save${edited.length ? ` (${edited.length})` : ""}`}</button>}
       >
         <div className="ad-toolbar">
           <select value={activeCourse} onChange={(event) => setCourseId(event.target.value)} aria-label="Course">
             {courses.data.map((course) => <option key={course.id} value={course.id}>{course.code} · {course.title}</option>)}
           </select>
-          <input type="date" className="ad-input" value={date} max={todayIso()} onChange={(event) => event.target.value && setDate(event.target.value)} aria-label="Class date" />
           <label className="ad-search"><Icon name="search" size={16} /><input value={filters.q} onChange={setFilter("q")} placeholder="Search name or student ID" /></label>
           <input className="ad-input" value={filters.batch} onChange={setFilter("batch")} placeholder="Batch" aria-label="Batch" size={8} />
           <input className="ad-input" value={filters.section} onChange={setFilter("section")} placeholder="Section" aria-label="Section" size={8} />
         </div>
         <div className="ad-toolbar">
-          <button type="button" className="ad-btn sm soft" onClick={() => markAll("PRESENT")} disabled={!roster.students.length}>Mark all present</button>
-          <button type="button" className="ad-btn sm ghost" onClick={() => markAll("ABSENT")} disabled={!roster.students.length}>Mark all absent</button>
-          <span className="ad-meta">{roster.students.length} students · {counts.PRESENT || 0} present · {counts.LATE || 0} late · {counts.ABSENT || 0} absent</span>
+          <input className="ad-input" type="number" min={0} max={100} value={fillAll} onChange={(event) => setFillAll(event.target.value)} placeholder="%" aria-label="Percentage for everyone listed" style={{ width: 80 }} />
+          <button type="button" className="ad-btn sm soft" onClick={applyToAll} disabled={!roster.students.length || parsePercent(fillAll) === null}>Set for all listed</button>
+          <span className="ad-meta">{roster.students.length} students{invalid.length ? ` · ${invalid.length} invalid (use 0–100)` : ""}</span>
         </div>
         <ErrorNote message={roster.error} onRetry={loadRoster} />
         {roster.loading && !roster.students.length ? <Skeleton /> : roster.students.length ? (
           <div className="ad-table-wrap">
             <table className="ad-table">
-              <thead><tr><th>Student</th><th>Batch · Section</th><th className="actions">Status</th></tr></thead>
+              <thead><tr><th>Student</th><th>Batch · Section</th><th>Last updated</th><th className="actions">Attendance %</th></tr></thead>
               <tbody>
-                {roster.students.map((student) => (
-                  <tr key={student.id}>
-                    <td>
-                      <div className="ad-person">
-                        <span className="ad-avatar sm">{initialsOf(student.name)}</span>
-                        <div><strong>{student.name}</strong><small>{student.studentId || "No student ID"}</small></div>
-                      </div>
-                    </td>
-                    <td><span className="ad-meta">{[student.batch && `Batch ${student.batch}`, student.section && `Sec ${student.section}`].filter(Boolean).join(" · ") || "—"}</span></td>
-                    <td className="actions">
-                      <div className="ad-att-choice" role="radiogroup" aria-label={`Attendance for ${student.name}`}>
-                        {Object.entries(ATTENDANCE_LABELS).map(([status, label]) => (
-                          <button
-                            key={status}
-                            type="button"
-                            role="radio"
-                            aria-checked={marks[student.id] === status}
-                            className={`ad-btn sm ${marks[student.id] === status ? (status === "ABSENT" ? "danger" : "primary") : "ghost"}`}
-                            onClick={() => setMarks((current) => ({ ...current, [student.id]: status }))}
-                          >{label}</button>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {roster.students.map((student) => {
+                  const value = drafts[student.id] ?? "";
+                  const bad = String(value) !== String(student.percent ?? "") && parsePercent(value) === null;
+                  return (
+                    <tr key={student.id}>
+                      <td>
+                        <div className="ad-person">
+                          <span className="ad-avatar sm">{initialsOf(student.name)}</span>
+                          <div><strong>{student.name}</strong><small>{student.studentId || "No student ID"}</small></div>
+                        </div>
+                      </td>
+                      <td><span className="ad-meta">{[student.batch && `Batch ${student.batch}`, student.section && `Sec ${student.section}`].filter(Boolean).join(" · ") || "—"}</span></td>
+                      <td className="nowrap"><span className="ad-meta">{student.updatedAt ? shortDate(student.updatedAt) : "Not set"}</span></td>
+                      <td className="actions">
+                        <input
+                          className={`ad-input ad-att-percent ${bad ? "invalid" : ""}`}
+                          type="number" min={0} max={100} step={1} inputMode="numeric"
+                          value={value}
+                          onChange={(event) => setDrafts((current) => ({ ...current, [student.id]: event.target.value }))}
+                          aria-label={`Attendance percentage for ${student.name}`}
+                          aria-invalid={bad}
+                        /> %
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

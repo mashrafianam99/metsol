@@ -73,7 +73,7 @@ function ForgotPasswordForm({ initialEmail, onBack }) {
 export default function Login({ onLogin, message = "" }) {
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
-  // Admin sign-in: same Supabase login, but only accounts with the ADMIN role are let through.
+  // Admin sign-in: same Supabase login, but only ADMIN and TEACHER accounts are let through.
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -166,9 +166,9 @@ export default function Login({ onLogin, message = "" }) {
           : responseError || "The server could not load your profile. Please try again.");
       }
       const profile = await response.json();
-      if (isAdminMode && profile.role !== "ADMIN") {
+      if (isAdminMode && profile.role !== "ADMIN" && profile.role !== "TEACHER") { // teachers use this sign-in too (Teacher Console)
         await supabase.auth.signOut();
-        throw new Error("This account doesn't have administrator access. Use the student sign-in instead.");
+        throw new Error("This account isn't an administrator or teacher. Use the student sign-in instead.");
       }
       onLogin(profile);
     } catch (requestError) {
@@ -235,9 +235,9 @@ export default function Login({ onLogin, message = "" }) {
 
   return (
     <AuthLayout
-      title={isAdminMode ? "Admin sign in" : isRegistering ? "Create your account" : "Welcome back"}
+      title={isAdminMode ? "Staff sign in" : isRegistering ? "Create your account" : "Welcome back"}
       subtitle={isAdminMode
-        ? "Sign in to the Admin Console to manage the university portal."
+        ? "Administrators and teachers sign in to their console."
         : isRegistering
           ? "Join the Smart University portal with your student details."
           : "Sign in to continue to your student portal."}
@@ -247,8 +247,8 @@ export default function Login({ onLogin, message = "" }) {
         <div className="auth-admin-badge">
           <span><Icon name="shield" size={18} /></span>
           <div>
-            <strong>Administrator access</strong>
-            <small>Only accounts with the admin role can sign in here.</small>
+            <strong>Administrator & teacher access</strong>
+            <small>Only administrator and teacher accounts can sign in here.</small>
           </div>
         </div>
       ) : (
@@ -406,7 +406,7 @@ export default function Login({ onLogin, message = "" }) {
           {isSubmitting && <span className="auth-spinner" />}
           {isSubmitting
             ? (isRegistering ? "Creating account…" : "Signing in…")
-            : (isAdminMode ? "Sign in to Admin Console" : isRegistering ? "Create account" : "Sign in")}
+            : (isAdminMode ? "Sign in to console" : isRegistering ? "Create account" : "Sign in")}
           {!isSubmitting && <Icon name="arrowRight" size={17} />}
         </button>
       </form>
@@ -429,7 +429,7 @@ export default function Login({ onLogin, message = "" }) {
               <div className="auth-divider"><span>or</span></div>
               <button type="button" className="auth-alt-button" onClick={() => switchAdminMode(true)}>
                 <Icon name="shield" size={17} />
-                Sign in as administrator
+                Sign in as administrator or teacher
               </button>
             </>
           )}

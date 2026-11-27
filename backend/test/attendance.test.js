@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { departmentScope, normalizeAttendanceSave, parseClassDate, summarizeAttendance } from '../src/attendanceRoutes.js';
+import { departmentScope, normalizeAttendanceSave, summarizeAttendance } from '../src/attendanceRoutes.js';
 
 test('teachers are limited to their own department, matched ignoring case; admins see all', () => {
   assert.deepEqual(departmentScope({ role: 'TEACHER', department: ' CSE ' }), { department: { equals: 'CSE', mode: 'insensitive' } });
@@ -8,32 +8,23 @@ test('teachers are limited to their own department, matched ignoring case; admin
   assert.throws(() => departmentScope({ role: 'TEACHER', department: '' }), (error) => error.status === 403 && /no department/.test(error.message));
 });
 
-test('class dates must be real YYYY-MM-DD dates and are stored as UTC midnight', () => {
-  assert.equal(parseClassDate('2026-11-28').toISOString(), '2026-11-28T00:00:00.000Z');
-  assert.equal(parseClassDate('2026-02-30'), null);
-  assert.equal(parseClassDate('28/11/2026'), null);
-  assert.equal(parseClassDate(undefined), null);
-});
-
-test('saving attendance needs a course, a date and known statuses, one entry per student', () => {
-  const ok = normalizeAttendanceSave({ courseId: 'c1', date: '2026-11-28', records: [{ studentId: 's1', status: 'PRESENT' }, { studentId: 's2', status: 'LATE' }] });
+test('saving attendance needs a course and a whole-number percentage from 0 to 100 per student', () => {
+  const ok = normalizeAttendanceSave({ courseId: 'c1', records: [{ studentId: 's1', percent: 85 }, { studentId: 's2', percent: '0' }] });
   assert.equal(ok.error, undefined);
-  assert.equal(ok.value.records.length, 2);
-  assert.match(normalizeAttendanceSave({ date: '2026-11-28', records: [] }).error, /course/);
-  assert.match(normalizeAttendanceSave({ courseId: 'c1', date: 'today', records: [] }).error, /date/);
-  assert.match(normalizeAttendanceSave({ courseId: 'c1', date: '2026-11-28', records: [] }).error, /at least one/);
-  assert.match(normalizeAttendanceSave({ courseId: 'c1', date: '2026-11-28', records: [{ studentId: 's1', status: 'MAYBE' }] }).error, /Present, Absent or Late/);
-  assert.match(normalizeAttendanceSave({ courseId: 'c1', date: '2026-11-28', records: [{ studentId: 's1', status: 'PRESENT' }, { studentId: 's1', status: 'ABSENT' }] }).error, /once/);
+  assert.deepEqual(ok.value.records, [{ studentId: 's1', percent: 85 }, { studentId: 's2', percent: 0 }]);
+  assert.match(normalizeAttendanceSave({ records: [{ studentId: 's1', percent: 50 }] }).error, /course/);
+  assert.match(normalizeAttendanceSave({ courseId: 'c1', records: [] }).error, /at least one/);
+  for (const bad of [101, -1, 72.5, '', 'abc', null]) {
+    assert.match(normalizeAttendanceSave({ courseId: 'c1', records: [{ studentId: 's1', percent: bad }] }).error, /0 to 100/, `percent ${bad}`);
+  }
+  assert.match(normalizeAttendanceSave({ courseId: 'c1', records: [{ studentId: 's1', percent: 1 }, { studentId: 's1', percent: 2 }] }).error, /once/);
 });
 
-test('attendance summary counts late as attended and rounds the percentage', () => {
-  const rows = [
-    { courseId: 'c1', status: 'PRESENT' }, { courseId: 'c1', status: 'LATE' }, { courseId: 'c1', status: 'ABSENT' },
-    { courseId: 'c2', status: 'ABSENT' },
-  ];
+test('a student summary lists each course that has a percentage, in course-code order', () => {
+  const rows = [{ courseId: 'c2', percent: 64, updatedAt: 'd2' }, { courseId: 'c1', percent: 90, updatedAt: 'd1' }];
   const courses = [{ id: 'c1', code: 'CSE301', title: 'Database Systems' }, { id: 'c2', code: 'CSE302', title: 'AI' }];
   assert.deepEqual(summarizeAttendance(rows, courses), [
-    { courseId: 'c1', code: 'CSE301', title: 'Database Systems', present: 1, late: 1, absent: 1, total: 3, percent: 67 },
-    { courseId: 'c2', code: 'CSE302', title: 'AI', present: 0, late: 0, absent: 1, total: 1, percent: 0 },
+    { courseId: 'c1', code: 'CSE301', title: 'Database Systems', percent: 90, updatedAt: 'd1' },
+    { courseId: 'c2', code: 'CSE302', title: 'AI', percent: 64, updatedAt: 'd2' },
   ]);
 });

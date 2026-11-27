@@ -151,6 +151,19 @@ model Attendance {
   student User @relation(fields: [studentId], references: [id])
 }
 
+// Official attendance: one percentage per student per course, set by a teacher or admin.
+model CourseAttendance {
+  id          String   @id @default(cuid())
+  studentId   String
+  courseId    String
+  percent     Int
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([studentId, courseId])
+  @@index([courseId])
+}
+
 model Notice {
   id                 String   @id @default(cuid())
   title              String
